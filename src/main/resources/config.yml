@@ -1,0 +1,23 @@
+# How many seconds after typing /afk before the player becomes invincible.
+# Set to 0 for instant invincibility.
+invincible-after-seconds: 10
+
+# By default, PinnacleAFK uses the AFK scoreboard team to show AFK in both the tab list
+# and the name tag above the player's head. This preserves existing team prefixes.
+#
+# Only set use-player-list-name to true if you specifically want PinnacleAFK to override
+# the player's tab-list name while AFK. Keeping it false is safest with rank/team plugins.
+display:
+  use-player-list-name: false
+  tab-format: "&7[AFK] &f%player%"
+  nametag-prefix: "&7[AFK] &f"
+  nametag-suffix: ""
+
+messages:
+  now-afk: "&7You are now AFK. You cannot move. Type &f/afk &7again to return."
+  no-longer-afk: "&aYou are no longer AFK."
+  broadcast-now-afk: "&7%player% is now AFK."
+  broadcast-no-longer-afk: "&a%player% is no longer AFK."
+  invincible-now: "&bYou are now protected from all damage while AFK."
+  already-protected-delay: "&7You will become damage-proof in &f%seconds%s&7."
+  only-player: "&cOnly players can use this command."
