@@ -33,12 +33,14 @@ import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerFishEvent;
+import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -146,6 +148,30 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        AfkState state = afkPlayers.get(player.getUniqueId());
+        if (state == null) {
+            return;
+        }
+
+        state.lockLocation = event.getRespawnLocation().clone();
+
+        // Respawning can dismount the display. Wait until the player has fully respawned,
+        // then replace and reattach the marker at the actual destination.
+        Bukkit.getScheduler().runTask(this, () -> {
+            AfkState currentState = afkPlayers.get(player.getUniqueId());
+            if (currentState != state || !player.isOnline()) {
+                return;
+            }
+
+            currentState.lockLocation = player.getLocation().clone();
+            removeAfkDisplay(currentState);
+            currentState.afkDisplayEntityId = createAfkDisplay(player).getUniqueId();
+        });
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerInteract(PlayerInteractEvent event) {
         cancelAfkAction(event.getPlayer(), event);
@@ -153,6 +179,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    // PlayerInteractAtEntityEvent has its own handler list and must be handled separately.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerInteractAtEntity(PlayerInteractAtEntityEvent event) {
         cancelAfkAction(event.getPlayer(), event);
     }
 
@@ -350,18 +382,21 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         Component marker = format("display.nametag-prefix", player)
                 .append(format("display.nametag-suffix", player));
 
-        return player.getWorld().spawn(displayLocation, TextDisplay.class, display -> {
-            display.text(marker);
-            display.setBillboard(Display.Billboard.CENTER);
-            display.setAlignment(TextDisplay.TextAlignment.CENTER);
-            display.setDefaultBackground(false);
-            display.setSeeThrough(true);
-            display.setShadowed(true);
-            display.setGravity(false);
-            display.setInvulnerable(true);
-            display.setPersistent(false);
-            display.setSilent(true);
+        TextDisplay display = player.getWorld().spawn(displayLocation, TextDisplay.class, spawnedDisplay -> {
+            spawnedDisplay.text(marker);
+            spawnedDisplay.setBillboard(Display.Billboard.CENTER);
+            spawnedDisplay.setAlignment(TextDisplay.TextAlignment.CENTER);
+            spawnedDisplay.setDefaultBackground(false);
+            spawnedDisplay.setSeeThrough(true);
+            spawnedDisplay.setShadowed(true);
+            spawnedDisplay.setGravity(false);
+            spawnedDisplay.setInvulnerable(true);
+            spawnedDisplay.setPersistent(false);
+            spawnedDisplay.setSilent(true);
         });
+
+        player.addPassenger(display);
+        return display;
     }
 
     private void removeAfkDisplay(AfkState state) {
@@ -435,9 +470,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private static final class AfkState {
-        private final Location lockLocation;
+        private Location lockLocation;
         private final Component originalPlayerListName;
-        private final UUID afkDisplayEntityId;
+        private UUID afkDisplayEntityId;
         private int invincibleTaskId = -1;
         private boolean invincible = false;
 
