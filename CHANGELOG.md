@@ -24,6 +24,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Blocked teleports and portals while AFK and added safe AFK cleanup if an external world change still succeeds, preventing stale cross-world movement locks ([#2](https://github.com/mccreeper1318/PinnacleAFK/issues/2)).
 - Replaced temporary AFK scoreboard teams with a floating above-head marker and direct tab formatting, preserving real team membership, friendly-fire rules, collision behavior, selectors, and other team mechanics ([#3](https://github.com/mccreeper1318/PinnacleAFK/issues/3)).
 - Prevented abrupt shutdowns from stranding players in generated AFK teams by eliminating temporary teams and reconciling legacy shared and per-player AFK teams during startup ([#4](https://github.com/mccreeper1318/PinnacleAFK/issues/4)).
+- Cleared AFK state on death with a respawn failsafe, cancelling delayed protection, removing the marker, restoring the tab-list name, and preventing stale death-location locks ([#5](https://github.com/mccreeper1318/PinnacleAFK/issues/5)).
 
 ## [1.0.2] - 2026-06-26
 

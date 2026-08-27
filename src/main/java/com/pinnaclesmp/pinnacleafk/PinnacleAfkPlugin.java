@@ -25,6 +25,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCreativeEvent;
@@ -153,27 +154,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerDeath(PlayerDeathEvent event) {
+        clearAfkState(event.getEntity());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerRespawn(PlayerRespawnEvent event) {
-        Player player = event.getPlayer();
-        AfkState state = afkPlayers.get(player.getUniqueId());
-        if (state == null) {
-            return;
-        }
-
-        state.lockLocation = event.getRespawnLocation().clone();
-
-        // Respawning can dismount the display. Wait until the player has fully respawned,
-        // then replace and reattach the marker at the actual destination.
-        Bukkit.getScheduler().runTask(this, () -> {
-            AfkState currentState = afkPlayers.get(player.getUniqueId());
-            if (currentState != state || !player.isOnline()) {
-                return;
-            }
-
-            currentState.lockLocation = player.getLocation().clone();
-            removeAfkDisplay(currentState);
-            currentState.afkDisplayEntityId = createAfkDisplay(player).getUniqueId();
-        });
+        // Failsafe for deaths or respawns initiated by other plugins outside the normal lifecycle.
+        clearAfkState(event.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -458,6 +446,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    private void clearAfkState(Player player) {
+        if (isAfk(player)) {
+            setAfk(player, false, false);
+        }
+    }
+
     private boolean isAfk(Player player) {
         return afkPlayers.containsKey(player.getUniqueId());
     }
@@ -503,9 +497,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private static final class AfkState {
-        private Location lockLocation;
+        private final Location lockLocation;
         private final Component originalPlayerListName;
-        private UUID afkDisplayEntityId;
+        private final UUID afkDisplayEntityId;
         private int invincibleTaskId = -1;
         private boolean invincible = false;
 
