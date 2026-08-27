@@ -2,7 +2,7 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
-## [1.1.0] - Unreleased
+## [26.2-1.1.0] - Unreleased
 
 ### Added
 
@@ -13,6 +13,10 @@ All notable changes to PinnacleAFK are documented in this file.
 ### Changed
 
 - Updated the build instructions to use the included Gradle wrapper and document the Java 25 requirement on Linux, macOS, and Windows ([#22](https://github.com/mccreeper1318/PinnacleAFK/issues/22)).
+
+### Fixed
+
+- Prevented AFK players from attacking entities, launching projectiles, breaking or placing blocks, using or moving items, and interacting with entities or inventories ([#1](https://github.com/mccreeper1318/PinnacleAFK/issues/1)).
 
 ## [1.0.2] - 2026-06-26
 
