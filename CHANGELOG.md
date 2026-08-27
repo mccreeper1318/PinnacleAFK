@@ -28,6 +28,10 @@ All notable changes to PinnacleAFK are documented in this file.
 - Preserved team changes made by rank and scoreboard plugins while players are AFK by removing AFK ownership and stale restoration of scoreboard-team membership ([#6](https://github.com/mccreeper1318/PinnacleAFK/issues/6)).
 - Made AFK indicators independent of main, per-player, and viewer-specific scoreboards by using a floating display and direct tab-list formatting, preventing custom scoreboard plugins from hiding or misformatting AFK status ([#7](https://github.com/mccreeper1318/PinnacleAFK/issues/7)).
 - Preserved custom tab-list components when applying the AFK indicator, reconciled formatting changes made by other plugins while AFK, and avoided restoring stale values ([#8](https://github.com/mccreeper1318/PinnacleAFK/issues/8)).
+- Merged newly bundled configuration defaults into existing files and used bundled message defaults for missing settings, preventing blank messages after upgrades ([#9](https://github.com/mccreeper1318/PinnacleAFK/issues/9)).
+- Added a configurable real-time cooldown for repeated `/afk` toggles, preventing chat floods and unnecessary display churn ([#10](https://github.com/mccreeper1318/PinnacleAFK/issues/10)).
+- Measured delayed protection against a monotonic real-time deadline instead of server ticks, preventing low TPS from proportionally extending the vulnerable period ([#11](https://github.com/mccreeper1318/PinnacleAFK/issues/11)).
+- Validated protection and cooldown durations during startup, logging and replacing negative, fractional, nonnumeric, or out-of-range values with safe defaults instead of silently granting instant protection ([#12](https://github.com/mccreeper1318/PinnacleAFK/issues/12)).
 
 ## [1.0.2] - 2026-06-26
 
