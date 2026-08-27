@@ -10,9 +10,11 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
+import org.bukkit.entity.TextDisplay;
 import org.bukkit.event.Cancellable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -52,7 +54,7 @@ import java.util.UUID;
 
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
-    private static final String AFK_TEAM_PREFIX = "pafk_";
+    private static final double AFK_MARKER_HEIGHT_OFFSET = 2.6D;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
@@ -269,25 +271,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        String entry = player.getName();
-        Team previousTeam = scoreboard.getEntryTeam(entry);
-        String temporaryTeamName = temporaryAfkTeamName(player);
-
-        Team existingTemporaryTeam = scoreboard.getTeam(temporaryTeamName);
-        if (existingTemporaryTeam != null) {
-            existingTemporaryTeam.unregister();
-        }
-
-        Team afkTeam = scoreboard.registerNewTeam(temporaryTeamName);
-        setupTemporaryAfkTeam(player, previousTeam, afkTeam);
-
+        TextDisplay afkDisplay = createAfkDisplay(player);
         AfkState state = new AfkState(
                 player.getLocation().clone(),
                 player.playerListName(),
-                previousTeam == null ? null : previousTeam.getName(),
-                temporaryTeamName,
-                getConfig().getBoolean("display.use-player-list-name", false)
+                afkDisplay.getUniqueId()
         );
 
         afkPlayers.put(player.getUniqueId(), state);
@@ -296,12 +284,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         player.clearActiveItem();
         player.closeInventory();
 
-        // Adding the entry automatically removes it from the old team on this scoreboard.
-        afkTeam.addEntry(entry);
-
-        if (state.usedPlayerListName) {
-            player.playerListName(format("display.tab-format", player));
-        }
+        player.playerListName(format("display.tab-format", player));
 
         int delaySeconds = Math.max(0, getConfig().getInt("invincible-after-seconds", 10));
         if (delaySeconds <= 0) {
@@ -339,28 +322,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             Bukkit.getScheduler().cancelTask(state.invincibleTaskId);
         }
 
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        String entry = player.getName();
-
-        Team temporaryAfkTeam = scoreboard.getTeam(state.temporaryTeamName);
-        if (temporaryAfkTeam != null) {
-            temporaryAfkTeam.removeEntry(entry);
-        }
-
-        if (state.previousTeamName != null) {
-            Team previousTeam = scoreboard.getTeam(state.previousTeamName);
-            if (previousTeam != null) {
-                previousTeam.addEntry(entry);
-            }
-        }
-
-        if (temporaryAfkTeam != null) {
-            temporaryAfkTeam.unregister();
-        }
-
-        if (state.usedPlayerListName) {
-            player.playerListName(state.originalPlayerListName);
-        }
+        removeAfkDisplay(state);
+        player.playerListName(state.originalPlayerListName);
 
         if (notify) {
             player.sendMessage(message("messages.no-longer-afk", player));
@@ -374,35 +337,30 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
-    private void setupTemporaryAfkTeam(Player player, Team previousTeam, Team afkTeam) {
-        Component afkPrefix = format("display.nametag-prefix", player);
-        Component afkSuffix = format("display.nametag-suffix", player);
+    private TextDisplay createAfkDisplay(Player player) {
+        Location displayLocation = player.getLocation().clone().add(0.0D, AFK_MARKER_HEIGHT_OFFSET, 0.0D);
+        Component marker = format("display.nametag-prefix", player)
+                .append(format("display.nametag-suffix", player));
 
-        if (previousTeam == null) {
-            afkTeam.prefix(afkPrefix);
-            afkTeam.suffix(afkSuffix);
-            return;
-        }
-
-        copyTeamSettings(previousTeam, afkTeam);
-        afkTeam.prefix(previousTeam.prefix().append(afkPrefix));
-        afkTeam.suffix(afkSuffix.append(previousTeam.suffix()));
+        return player.getWorld().spawn(displayLocation, TextDisplay.class, display -> {
+            display.text(marker);
+            display.setBillboard(Display.Billboard.CENTER);
+            display.setAlignment(TextDisplay.TextAlignment.CENTER);
+            display.setDefaultBackground(false);
+            display.setSeeThrough(true);
+            display.setShadowed(true);
+            display.setGravity(false);
+            display.setInvulnerable(true);
+            display.setPersistent(false);
+            display.setSilent(true);
+        });
     }
 
-    private void copyTeamSettings(Team source, Team target) {
-        target.displayName(source.displayName());
-        target.setAllowFriendlyFire(source.allowFriendlyFire());
-        target.setCanSeeFriendlyInvisibles(source.canSeeFriendlyInvisibles());
-        target.setColor(source.getColor());
-
-        for (Team.Option option : Team.Option.values()) {
-            target.setOption(option, source.getOption(option));
+    private void removeAfkDisplay(AfkState state) {
+        Entity display = Bukkit.getEntity(state.afkDisplayEntityId);
+        if (display != null) {
+            display.remove();
         }
-    }
-
-    private String temporaryAfkTeamName(Player player) {
-        String compactUuid = player.getUniqueId().toString().replace("-", "");
-        return AFK_TEAM_PREFIX + compactUuid.substring(0, 11);
     }
 
     private void cleanupLegacySharedAfkTeam() {
@@ -471,18 +429,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private static final class AfkState {
         private final Location lockLocation;
         private final Component originalPlayerListName;
-        private final String previousTeamName;
-        private final String temporaryTeamName;
-        private final boolean usedPlayerListName;
+        private final UUID afkDisplayEntityId;
         private int invincibleTaskId = -1;
         private boolean invincible = false;
 
-        private AfkState(Location lockLocation, Component originalPlayerListName, String previousTeamName, String temporaryTeamName, boolean usedPlayerListName) {
+        private AfkState(Location lockLocation, Component originalPlayerListName, UUID afkDisplayEntityId) {
             this.lockLocation = lockLocation;
             this.originalPlayerListName = originalPlayerListName;
-            this.previousTeamName = previousTeamName;
-            this.temporaryTeamName = temporaryTeamName;
-            this.usedPlayerListName = usedPlayerListName;
+            this.afkDisplayEntityId = afkDisplayEntityId;
         }
     }
 }

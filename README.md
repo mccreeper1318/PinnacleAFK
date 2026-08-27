@@ -6,8 +6,8 @@ PaperMC 26.2 plugin that adds `/afk`.
 
 - `/afk` toggles AFK mode on and off.
 - Shows `[AFK]` in the tab menu.
-- Shows `[AFK]` next to the player's name tag above their head using a scoreboard team prefix.
-- Preserves existing scoreboard team prefixes/suffixes by using a temporary per-player AFK team.
+- Shows `[AFK]` above the player's name using a floating text marker.
+- Preserves the player's real scoreboard team membership and team-based mechanics while AFK.
 - Freezes the player in place until they type `/afk` again.
 - Makes the player invincible after a configurable delay in seconds.
 - Announces to the server when a player goes AFK or returns from AFK.
@@ -56,7 +56,6 @@ build/libs/PinnacleAFK-<version>.jar
 invincible-after-seconds: 10
 
 display:
-  use-player-list-name: false
   tab-format: "&7[AFK] &f%player%"
   nametag-prefix: "&7[AFK] &f"
   nametag-suffix: ""
@@ -71,15 +70,11 @@ messages:
   only-player: "&cOnly players can use this command."
 ```
 
-For the name tag above the player, Minecraft's normal API only supports adding text before or after the real username through scoreboard teams. That is why the config uses `nametag-prefix` and `nametag-suffix` instead of a full `%player%` format.
+The `nametag-prefix` and `nametag-suffix` values form a floating marker displayed above the player's normal name tag. PinnacleAFK uses this marker instead of a scoreboard-team prefix, so entering AFK does not change team membership, friendly-fire rules, collision behavior, or team selectors.
 
-## Prefix preservation fix in 1.0.1
+## Team preservation in 26.2-1.1.0
 
-Older versions used one shared `pinnacleafk` scoreboard team. That worked for showing `[AFK]`, but it could replace a player's real team and leave their old prefix missing after toggling AFK off.
-
-Version 1.0.1 creates a temporary per-player AFK team, copies the player's current team settings, adds the AFK prefix/suffix, and then restores the player to their original team when `/afk` is toggled off.
-
-If a player was already affected by the older version, restart the server with this version installed. If their original team membership was already lost before the update, re-add them to the original team once after the restart.
+Older versions temporarily moved AFK players into plugin-created scoreboard teams. Version 26.2-1.1.0 leaves every player in their real team continuously and uses a nonpersistent text marker for the above-head AFK indicator.
 
 ## Changelog
 

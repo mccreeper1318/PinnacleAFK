@@ -18,6 +18,7 @@ All notable changes to PinnacleAFK are documented in this file.
 
 - Prevented AFK players from attacking entities, launching projectiles, breaking or placing blocks, using or moving items, and interacting with entities or inventories ([#1](https://github.com/mccreeper1318/PinnacleAFK/issues/1)).
 - Blocked teleports and portals while AFK and added safe AFK cleanup if an external world change still succeeds, preventing stale cross-world movement locks ([#2](https://github.com/mccreeper1318/PinnacleAFK/issues/2)).
+- Replaced temporary AFK scoreboard teams with a floating above-head marker and direct tab formatting, preserving real team membership, friendly-fire rules, collision behavior, selectors, and other team mechanics ([#3](https://github.com/mccreeper1318/PinnacleAFK/issues/3)).
 
 ## [1.0.2] - 2026-06-26
 
