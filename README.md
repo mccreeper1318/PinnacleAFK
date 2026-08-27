@@ -13,22 +13,39 @@ PaperMC 26.2 plugin that adds `/afk`.
 - Announces to the server when a player goes AFK or returns from AFK.
 - Cancels all normal Bukkit/Paper damage events while protected.
 
+## Requirements
+
+- Java Development Kit (JDK) 25
+- PaperMC 26.2
+
+Make sure `java -version` reports Java 25 before building.
+
 ## Build
 
+The repository includes the Gradle wrapper, so a separate Gradle installation is not required.
+
+Linux or macOS:
+
 ```bash
-gradle build
+./gradlew build
 ```
 
-The jar will be in:
+Windows:
+
+```powershell
+.\gradlew.bat build
+```
+
+The versioned JAR will be created in:
 
 ```text
-build/libs/PinnacleAFK-1.0.2.jar
+build/libs/PinnacleAFK-<version>.jar
 ```
 
 ## Install
 
 1. Build the plugin.
-2. Put the jar into your server's `plugins` folder.
+2. Put the JAR into your server's `plugins` folder.
 3. Start or restart the Paper server.
 4. Edit `plugins/PinnacleAFK/config.yml` if needed.
 5. Restart the server or reload the plugin with your preferred plugin manager.
@@ -54,13 +71,20 @@ messages:
   only-player: "&cOnly players can use this command."
 ```
 
-For the name tag above the player, Minecraft's normal API only supports adding text before/after the real username through scoreboard teams. That is why the config uses `nametag-prefix` and `nametag-suffix` instead of a full `%player%` format.
-
+For the name tag above the player, Minecraft's normal API only supports adding text before or after the real username through scoreboard teams. That is why the config uses `nametag-prefix` and `nametag-suffix` instead of a full `%player%` format.
 
 ## Prefix preservation fix in 1.0.1
 
 Older versions used one shared `pinnacleafk` scoreboard team. That worked for showing `[AFK]`, but it could replace a player's real team and leave their old prefix missing after toggling AFK off.
 
-Version 1.0.1 now creates a temporary per-player AFK team, copies the player's current team settings, adds the AFK prefix/suffix, and then restores the player to their original team when `/afk` is toggled off.
+Version 1.0.1 creates a temporary per-player AFK team, copies the player's current team settings, adds the AFK prefix/suffix, and then restores the player to their original team when `/afk` is toggled off.
 
 If a player was already affected by the older version, restart the server with this version installed. If their original team membership was already lost before the update, re-add them to the original team once after the restart.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history and upcoming changes.
+
+## License
+
+PinnacleAFK is licensed under the [MIT License](LICENSE).
