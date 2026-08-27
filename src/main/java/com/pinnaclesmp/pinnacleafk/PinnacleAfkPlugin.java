@@ -56,9 +56,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
+    private static final Pattern LEGACY_PER_PLAYER_AFK_TEAM_NAME = Pattern.compile("^pafk_[0-9a-f]{11}$");
     private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
@@ -67,7 +69,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        cleanupLegacySharedAfkTeam();
+        cleanupLegacyAfkTeams();
 
         Bukkit.getPluginManager().registerEvents(this, this);
 
@@ -421,23 +423,39 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
-    private void cleanupLegacySharedAfkTeam() {
+    private void cleanupLegacyAfkTeams() {
         Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        Team legacyTeam = scoreboard.getTeam(LEGACY_SHARED_AFK_TEAM_NAME);
-        if (legacyTeam == null) {
-            return;
-        }
 
-        Set<String> legacyEntries = new HashSet<>(legacyTeam.getEntries());
-        legacyTeam.unregister();
+        Team legacySharedTeam = scoreboard.getTeam(LEGACY_SHARED_AFK_TEAM_NAME);
+        if (legacySharedTeam != null) {
+            Set<String> legacyEntries = new HashSet<>(legacySharedTeam.getEntries());
+            legacySharedTeam.unregister();
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (legacyEntries.contains(player.getName())) {
-                player.playerListName(null);
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (legacyEntries.contains(player.getName())) {
+                    player.playerListName(null);
+                }
             }
+
+            getLogger().info("Removed legacy shared AFK scoreboard team from older PinnacleAFK versions.");
         }
 
-        getLogger().info("Removed legacy shared AFK scoreboard team from older PinnacleAFK versions.");
+        int removedPerPlayerTeams = 0;
+        for (Team team : new HashSet<>(scoreboard.getTeams())) {
+            if (!LEGACY_PER_PLAYER_AFK_TEAM_NAME.matcher(team.getName()).matches()) {
+                continue;
+            }
+
+            team.unregister();
+            removedPerPlayerTeams++;
+        }
+
+        if (removedPerPlayerTeams > 0) {
+            getLogger().info(
+                    "Removed " + removedPerPlayerTeams
+                            + " legacy per-player AFK scoreboard team(s) left by older PinnacleAFK versions."
+            );
+        }
     }
 
     private boolean isAfk(Player player) {
