@@ -6,10 +6,33 @@ invincible-after-seconds: 10
 # Set to 0 to disable the cooldown. Invalid values are reset to 3.
 toggle-cooldown-seconds: 3
 
+# Worlds where players may enter AFK mode. Matching is case-insensitive.
+# Leave empty or use ["*"] to allow every world.
+allowed-worlds: []
+
+broadcasts:
+  # Announce AFK status changes to every online player.
+  enabled: true
+
+protection:
+  # Whether AFK players can receive delayed damage protection.
+  enabled: true
+  # If true, players also need the pinnacleafk.protection permission.
+  require-permission: false
+  # Leave empty or use ["*"] to allow protection in every AFK-enabled world.
+  allowed-worlds: []
+
+automatic-afk:
+  # Disabled by default. When enabled, inactive players enter AFK automatically.
+  enabled: false
+  after-seconds: 300
+
 # PinnacleAFK formats the tab-list name directly and uses a floating text marker
 # above the player. It never moves the player out of their real scoreboard team.
 # In tab-format, %player% inserts the player's current formatted tab-list component.
 display:
+  tab-enabled: true
+  nametag-enabled: true
   tab-format: "&7[AFK] &f%player%"
   nametag-prefix: "&7[AFK] &f"
   nametag-suffix: ""
@@ -22,4 +45,16 @@ messages:
   invincible-now: "&bYou are now protected from all damage while AFK."
   already-protected-delay: "&7You will become damage-proof in &f%seconds%s&7."
   toggle-cooldown: "&cPlease wait &f%seconds%s &cbefore toggling AFK again."
+  world-not-allowed: "&cAFK mode is not allowed in this world."
+  afk-cleared-world: "&cYour AFK status was cleared because this world is no longer allowed."
   only-player: "&cOnly players can use this command."
+  no-permission: "&cYou do not have permission to use this command."
+  reload-success: "&aPinnacleAFK configuration reloaded."
+  reload-failed: "&cPinnacleAFK could not reload config.yml. Check the server log."
+  admin-usage: "&7Usage: &f/pafk <reload|list|status|remove> [player]"
+  admin-list-empty: "&7No players are currently AFK."
+  admin-list: "&7AFK players (&f%count%&7): &f%players%"
+  admin-status-afk: "&f%player% &7is currently AFK."
+  admin-status-not-afk: "&f%player% &7is not AFK."
+  admin-removed: "&aRemoved AFK status from &f%player%&a."
+  player-not-found: "&cPlayer &f%player% &cis not online."

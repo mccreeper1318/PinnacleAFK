@@ -1,7 +1,7 @@
 name: PinnacleAFK
 version: '${version}'
 main: com.pinnaclesmp.pinnacleafk.PinnacleAfkPlugin
-description: Adds a manual AFK toggle with tab/name tag markers, movement lock, and delayed invincibility.
+description: Adds manual or automatic AFK status with configurable displays, movement lock, and delayed protection.
 author: PinnacleSMP
 api-version: '26.2'
 commands:
@@ -9,7 +9,17 @@ commands:
     description: Toggle AFK mode on or off.
     usage: /afk
     permission: pinnacleafk.use
+  pafk:
+    description: Reload PinnacleAFK or manage online AFK players.
+    usage: /pafk <reload|list|status|remove> [player]
+    permission: pinnacleafk.admin
 permissions:
   pinnacleafk.use:
     description: Allows a player to use /afk.
     default: true
+  pinnacleafk.admin:
+    description: Allows use of PinnacleAFK reload and management commands.
+    default: op
+  pinnacleafk.protection:
+    description: Allows AFK damage protection when protection.require-permission is enabled.
+    default: false

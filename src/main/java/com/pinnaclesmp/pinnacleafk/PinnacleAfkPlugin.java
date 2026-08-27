@@ -1,5 +1,6 @@
 package com.pinnaclesmp.pinnacleafk;
 
+import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
@@ -33,23 +34,29 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerFishEvent;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
 import org.bukkit.util.Transformation;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,22 +65,21 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
     private static final Pattern LEGACY_PER_PLAYER_AFK_TEAM_NAME = Pattern.compile("^pafk_[0-9a-f]{11}$");
     private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
-    private static final int DEFAULT_INVINCIBLE_AFTER_SECONDS = 10;
-    private static final int DEFAULT_TOGGLE_COOLDOWN_SECONDS = 3;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final Map<UUID, Long> lastToggleNanos = new HashMap<>();
+    private final Map<UUID, Long> lastActivityNanos = new ConcurrentHashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
-    private int invincibleAfterSeconds;
-    private int toggleCooldownSeconds;
+    private AfkSettings settings;
     private int afkReconcileTaskId = -1;
+    private int automaticAfkTaskId = -1;
 
     @Override
     public void onEnable() {
@@ -81,17 +87,15 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         cleanupLegacyAfkTeams();
 
         Bukkit.getPluginManager().registerEvents(this, this);
-
-        PluginCommand afkCommand = getCommand("afk");
-        if (afkCommand != null) {
-            afkCommand.setExecutor(this);
-            afkCommand.setTabCompleter(this);
-        }
+        registerCommand("afk");
+        registerCommand("pafk");
+        restartAutomaticAfkTask();
     }
 
     @Override
     public void onDisable() {
         stopAfkReconcileTask();
+        stopAutomaticAfkTask();
 
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (isAfk(player)) {
@@ -100,12 +104,23 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
         afkPlayers.clear();
         lastToggleNanos.clear();
+        lastActivityNanos.clear();
     }
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (command.getName().equalsIgnoreCase("pafk")) {
+            return handleAdminCommand(sender, args);
+        }
+
         if (!(sender instanceof Player player)) {
             sender.sendMessage(message("messages.only-player", null));
+            return true;
+        }
+
+        boolean enteringAfk = !isAfk(player);
+        if (enteringAfk && !settings.allowsAfkWorld(player.getWorld().getName())) {
+            player.sendMessage(message("messages.world-not-allowed", player));
             return true;
         }
 
@@ -113,25 +128,46 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return true;
         }
 
-        setAfk(player, !isAfk(player), true);
+        setAfk(player, enteringAfk, true);
         return true;
     }
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        if (!command.getName().equalsIgnoreCase("pafk") || !sender.hasPermission("pinnacleafk.admin")) {
+            return Collections.emptyList();
+        }
+
+        if (args.length == 1) {
+            return PafkAction.completions(args[0]);
+        }
+
+        if (args.length == 2
+                && (args[0].equalsIgnoreCase("status") || args[0].equalsIgnoreCase("remove"))) {
+            String prefix = args[1].toLowerCase(java.util.Locale.ROOT);
+            return Bukkit.getOnlinePlayers().stream()
+                    .map(Player::getName)
+                    .filter(name -> name.toLowerCase(java.util.Locale.ROOT).startsWith(prefix))
+                    .sorted(String.CASE_INSENSITIVE_ORDER)
+                    .toList();
+        }
+
         return Collections.emptyList();
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerMove(PlayerMoveEvent event) {
         Player player = event.getPlayer();
-        AfkState state = afkPlayers.get(player.getUniqueId());
-        if (state == null) {
+        Location to = event.getTo();
+        if (to == null) {
             return;
         }
 
-        Location to = event.getTo();
-        if (to == null) {
+        AfkState state = afkPlayers.get(player.getUniqueId());
+        if (state == null) {
+            if (!samePosition(event.getFrom(), to)) {
+                recordActivity(player);
+            }
             return;
         }
 
@@ -165,6 +201,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             // A world change that bypassed the cancellable teleport events cannot safely
             // retain a lock location from the previous world.
             setAfk(player, false, true);
+        } else {
+            recordActivity(player);
         }
     }
 
@@ -177,6 +215,26 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     public void onPlayerRespawn(PlayerRespawnEvent event) {
         // Failsafe for deaths or respawns initiated by other plugins outside the normal lifecycle.
         clearAfkState(event.getPlayer());
+        recordActivity(event.getPlayer());
+    }
+
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        recordActivity(event.getPlayer());
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
+        if (!isAfk(event.getPlayer())) {
+            recordActivity(event.getPlayer());
+        }
+    }
+
+    @EventHandler(ignoreCancelled = true)
+    public void onAsyncChat(AsyncChatEvent event) {
+        // AsyncChatEvent can run away from the server thread, so only update the
+        // thread-safe activity clock here. AFK state is evaluated by the main-thread scan.
+        lastActivityNanos.put(event.getPlayer().getUniqueId(), System.nanoTime());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
@@ -276,8 +334,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onEntityPickupItem(EntityPickupItemEvent event) {
-        if (event.getEntity() instanceof Player player) {
-            cancelAfkAction(player, event);
+        if (event.getEntity() instanceof Player player && isAfk(player)) {
+            // Pickup is passive and must not reset the inactivity timer for active players.
+            event.setCancelled(true);
         }
     }
 
@@ -303,7 +362,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
-        activateProtectionIfDue(player, state, System.nanoTime());
+        activateProtectionIfDue(player, state, System.nanoTime(), true);
         if (state.invincible) {
             event.setCancelled(true);
             event.setDamage(0.0D);
@@ -314,9 +373,131 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         lastToggleNanos.remove(player.getUniqueId());
+        lastActivityNanos.remove(player.getUniqueId());
         if (isAfk(player)) {
             setAfk(player, false, false);
         }
+    }
+
+    private void registerCommand(String commandName) {
+        PluginCommand pluginCommand = getCommand(commandName);
+        if (pluginCommand == null) {
+            getLogger().severe("Command '" + commandName + "' is missing from plugin.yml.");
+            return;
+        }
+
+        pluginCommand.setExecutor(this);
+        pluginCommand.setTabCompleter(this);
+    }
+
+    private boolean handleAdminCommand(CommandSender sender, String[] args) {
+        if (!sender.hasPermission("pinnacleafk.admin")) {
+            sender.sendMessage(message("messages.no-permission", null));
+            return true;
+        }
+
+        if (args.length == 0) {
+            sender.sendMessage(message("messages.admin-usage", null));
+            return true;
+        }
+
+        PafkAction action = PafkAction.parse(args[0]).orElse(null);
+        if (action == null) {
+            sender.sendMessage(message("messages.admin-usage", null));
+            return true;
+        }
+
+        return switch (action) {
+            case RELOAD -> {
+                if (args.length != 1) {
+                    sender.sendMessage(message("messages.admin-usage", null));
+                } else {
+                    reloadPluginConfig(sender);
+                }
+                yield true;
+            }
+            case LIST -> {
+                if (args.length != 1) {
+                    sender.sendMessage(message("messages.admin-usage", null));
+                } else {
+                    sendAfkList(sender);
+                }
+                yield true;
+            }
+            case STATUS -> {
+                if (args.length != 2) {
+                    sender.sendMessage(message("messages.admin-usage", null));
+                } else {
+                    sendAfkStatus(sender, args[1]);
+                }
+                yield true;
+            }
+            case REMOVE -> {
+                if (args.length != 2) {
+                    sender.sendMessage(message("messages.admin-usage", null));
+                } else {
+                    removeAfkPlayer(sender, args[1]);
+                }
+                yield true;
+            }
+        };
+    }
+
+    private void sendAfkList(CommandSender sender) {
+        List<String> afkNames = afkPlayers.keySet().stream()
+                .map(Bukkit::getPlayer)
+                .filter(Objects::nonNull)
+                .map(Player::getName)
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .toList();
+
+        if (afkNames.isEmpty()) {
+            sender.sendMessage(message("messages.admin-list-empty", null));
+            return;
+        }
+
+        sender.sendMessage(messageWithValues(
+                "messages.admin-list",
+                Map.of(
+                        "count", String.valueOf(afkNames.size()),
+                        "players", String.join(", ", afkNames)
+                )
+        ));
+    }
+
+    private void sendAfkStatus(CommandSender sender, String playerName) {
+        Player target = Bukkit.getPlayerExact(playerName);
+        if (target == null) {
+            sender.sendMessage(messageWithValues(
+                    "messages.player-not-found",
+                    Map.of("player", playerName)
+            ));
+            return;
+        }
+
+        String path = isAfk(target)
+                ? "messages.admin-status-afk"
+                : "messages.admin-status-not-afk";
+        sender.sendMessage(message(path, target));
+    }
+
+    private void removeAfkPlayer(CommandSender sender, String playerName) {
+        Player target = Bukkit.getPlayerExact(playerName);
+        if (target == null) {
+            sender.sendMessage(messageWithValues(
+                    "messages.player-not-found",
+                    Map.of("player", playerName)
+            ));
+            return;
+        }
+
+        if (!isAfk(target)) {
+            sender.sendMessage(message("messages.admin-status-not-afk", target));
+            return;
+        }
+
+        setAfk(target, false, true);
+        sender.sendMessage(message("messages.admin-removed", target));
     }
 
     private void setAfk(Player player, boolean afk, boolean notify) {
@@ -332,15 +513,18 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
-        TextDisplay afkDisplay = createAfkDisplay(player);
-        Component originalPlayerListName = player.playerListName();
-        Component basePlayerListName = playerListNameOrUsername(player, originalPlayerListName);
-        Component appliedPlayerListName = formatPlayerListName(basePlayerListName);
+        if (!settings.allowsAfkWorld(player.getWorld().getName())) {
+            if (notify) {
+                player.sendMessage(message("messages.world-not-allowed", player));
+            }
+            return;
+        }
+
+        long enteredAtNanos = System.nanoTime();
         AfkState state = new AfkState(
                 player.getLocation().clone(),
-                originalPlayerListName,
-                appliedPlayerListName,
-                afkDisplay.getUniqueId()
+                player.playerListName(),
+                enteredAtNanos
         );
 
         afkPlayers.put(player.getUniqueId(), state);
@@ -350,26 +534,18 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         player.clearActiveItem();
         player.closeInventory();
 
-        player.playerListName(appliedPlayerListName);
-
-        if (invincibleAfterSeconds == 0) {
-            state.invincible = true;
-            if (notify) {
-                player.sendMessage(message("messages.invincible-now", player));
-            }
-        } else {
-            state.protectionDeadlineNanos = System.nanoTime()
-                    + TimeUnit.SECONDS.toNanos(invincibleAfterSeconds);
-        }
+        reconcilePlayerListName(player, state);
+        refreshAfkDisplay(player, state);
+        configureProtection(player, state, enteredAtNanos, notify);
 
         if (notify) {
             player.sendMessage(message("messages.now-afk", player));
             broadcast(message("messages.broadcast-now-afk", player));
-            if (invincibleAfterSeconds > 0) {
+            if (!state.invincible && state.protectionDeadlineNanos != AfkTiming.NO_DEADLINE) {
                 player.sendMessage(messageWithSeconds(
                         "messages.already-protected-delay",
                         player,
-                        invincibleAfterSeconds
+                        settings.invincibleAfterSeconds()
                 ));
             }
         }
@@ -382,9 +558,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         removeAfkDisplay(state);
-        if (Objects.equals(player.playerListName(), state.appliedPlayerListName)) {
-            player.playerListName(state.originalPlayerListName);
-        }
+        removeTabIndicator(player, state);
+        recordActivity(player);
         stopAfkReconcileTaskIfIdle();
 
         if (notify) {
@@ -394,31 +569,30 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private void broadcast(Component component) {
+        if (!settings.broadcastsEnabled()) {
+            return;
+        }
+
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
             onlinePlayer.sendMessage(component);
         }
     }
 
     private boolean isToggleOnCooldown(Player player) {
-        if (toggleCooldownSeconds == 0) {
+        int cooldownSeconds = settings.toggleCooldownSeconds();
+        if (cooldownSeconds == 0) {
             return false;
         }
 
         long now = System.nanoTime();
-        long cooldownNanos = TimeUnit.SECONDS.toNanos(toggleCooldownSeconds);
         Long lastToggle = lastToggleNanos.get(player.getUniqueId());
-
         if (lastToggle != null) {
-            long remainingNanos = cooldownNanos - (now - lastToggle);
-            if (remainingNanos > 0L) {
-                long secondNanos = TimeUnit.SECONDS.toNanos(1L);
-                int remainingSeconds = (int) Math.max(
-                        1L,
-                        Math.min(
-                                Integer.MAX_VALUE,
-                                (remainingNanos + secondNanos - 1L) / secondNanos
-                        )
-                );
+            int remainingSeconds = AfkTiming.remainingWholeSeconds(
+                    now,
+                    lastToggle,
+                    cooldownSeconds
+            );
+            if (remainingSeconds > 0) {
                 player.sendMessage(messageWithSeconds(
                         "messages.toggle-cooldown",
                         player,
@@ -467,36 +641,156 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             }
 
             AfkState state = entry.getValue();
-            activateProtectionIfDue(player, state, now);
+            activateProtectionIfDue(player, state, now, true);
             reconcilePlayerListName(player, state);
         }
     }
 
-    private void activateProtectionIfDue(Player player, AfkState state, long now) {
+    private boolean isProtectionEligible(Player player) {
+        return settings.allowsProtectionWorld(player.getWorld().getName())
+                && (!settings.protectionRequiresPermission()
+                || player.hasPermission("pinnacleafk.protection"));
+    }
+
+    private void configureProtection(
+            Player player,
+            AfkState state,
+            long now,
+            boolean notifyActivation
+    ) {
+        state.invincible = false;
+        state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+
+        if (!isProtectionEligible(player)) {
+            return;
+        }
+
+        state.protectionDeadlineNanos = AfkTiming.deadlineFrom(
+                state.enteredAtNanos,
+                settings.invincibleAfterSeconds()
+        );
+        activateProtectionIfDue(player, state, now, notifyActivation);
+    }
+
+    private void activateProtectionIfDue(
+            Player player,
+            AfkState state,
+            long now,
+            boolean notify
+    ) {
         if (state.invincible
-                || state.protectionDeadlineNanos == -1L
-                || now - state.protectionDeadlineNanos < 0L) {
+                || !isProtectionEligible(player)
+                || !AfkTiming.isDue(now, state.protectionDeadlineNanos)) {
             return;
         }
 
         state.invincible = true;
-        state.protectionDeadlineNanos = -1L;
-        player.sendMessage(message("messages.invincible-now", player));
+        state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+        if (notify) {
+            player.sendMessage(message("messages.invincible-now", player));
+        }
     }
 
-    private void reconcilePlayerListName(Player player, AfkState state) {
-        Component currentPlayerListName = player.playerListName();
-        if (Objects.equals(currentPlayerListName, state.appliedPlayerListName)) {
+    private void restartAutomaticAfkTask() {
+        stopAutomaticAfkTask();
+        if (!settings.automaticAfkEnabled()) {
             return;
         }
 
-        // Treat a value PinnacleAFK did not apply as the latest formatting owned
-        // by the server or another plugin, then wrap it with the AFK indicator.
-        state.originalPlayerListName = currentPlayerListName;
+        long now = System.nanoTime();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            lastActivityNanos.putIfAbsent(player.getUniqueId(), now);
+        }
+
+        automaticAfkTaskId = Bukkit.getScheduler()
+                .runTaskTimer(this, this::checkAutomaticAfkPlayers, 20L, 20L)
+                .getTaskId();
+    }
+
+    private void stopAutomaticAfkTask() {
+        if (automaticAfkTaskId == -1) {
+            return;
+        }
+
+        Bukkit.getScheduler().cancelTask(automaticAfkTaskId);
+        automaticAfkTaskId = -1;
+    }
+
+    private void checkAutomaticAfkPlayers() {
+        if (!settings.automaticAfkEnabled()) {
+            return;
+        }
+
+        long now = System.nanoTime();
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (isAfk(player)) {
+                continue;
+            }
+
+            if (!settings.allowsAfkWorld(player.getWorld().getName())) {
+                lastActivityNanos.put(player.getUniqueId(), now);
+                continue;
+            }
+
+            long lastActivity = lastActivityNanos.computeIfAbsent(
+                    player.getUniqueId(),
+                    ignored -> now
+            );
+            long deadline = AfkTiming.deadlineFrom(
+                    lastActivity,
+                    settings.automaticAfkAfterSeconds()
+            );
+            if (AfkTiming.isDue(now, deadline)) {
+                setAfk(player, true, true);
+            }
+        }
+    }
+
+    private void recordActivity(Player player) {
+        lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
+    }
+
+    private void reconcilePlayerListName(Player player, AfkState state) {
+        if (!settings.tabIndicatorEnabled()) {
+            removeTabIndicator(player, state);
+            state.originalPlayerListName = player.playerListName();
+            return;
+        }
+
+        Component currentPlayerListName = player.playerListName();
+        if (!state.tabIndicatorApplied) {
+            state.originalPlayerListName = currentPlayerListName;
+        } else if (ValueOwnership.stillOwns(currentPlayerListName, state.appliedPlayerListName)) {
+            return;
+        } else {
+            // A value PinnacleAFK did not apply belongs to the server or another plugin.
+            state.originalPlayerListName = currentPlayerListName;
+        }
+
         state.appliedPlayerListName = formatPlayerListName(
-                playerListNameOrUsername(player, currentPlayerListName)
+                playerListNameOrUsername(player, state.originalPlayerListName)
         );
+        state.tabIndicatorApplied = true;
         player.playerListName(state.appliedPlayerListName);
+    }
+
+    private void refreshTabIndicator(Player player, AfkState state) {
+        removeTabIndicator(player, state);
+        state.originalPlayerListName = player.playerListName();
+        reconcilePlayerListName(player, state);
+    }
+
+    private void removeTabIndicator(Player player, AfkState state) {
+        if (state.tabIndicatorApplied
+                && ValueOwnership.stillOwns(
+                        player.playerListName(),
+                        state.appliedPlayerListName
+                )) {
+            player.playerListName(state.originalPlayerListName);
+        }
+
+        state.appliedPlayerListName = null;
+        state.tabIndicatorApplied = false;
     }
 
     private Component playerListNameOrUsername(Player player, Component playerListName) {
@@ -522,8 +816,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private TextDisplay createAfkDisplay(Player player) {
         Location displayLocation = player.getLocation().clone();
-        Component marker = format("display.nametag-prefix", player)
-                .append(format("display.nametag-suffix", player));
+        Component marker = afkMarker(player);
 
         TextDisplay display = player.getWorld().spawn(displayLocation, TextDisplay.class, spawnedDisplay -> {
             spawnedDisplay.text(marker);
@@ -547,49 +840,103 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         return display;
     }
 
+    private Component afkMarker(Player player) {
+        return format("display.nametag-prefix", player)
+                .append(format("display.nametag-suffix", player));
+    }
+
+    private void refreshAfkDisplay(Player player, AfkState state) {
+        if (!settings.nametagIndicatorEnabled()) {
+            removeAfkDisplay(state);
+            return;
+        }
+
+        Entity existing = state.afkDisplayEntityId == null
+                ? null
+                : Bukkit.getEntity(state.afkDisplayEntityId);
+        if (existing instanceof TextDisplay textDisplay) {
+            textDisplay.text(afkMarker(player));
+            if (!player.getPassengers().contains(textDisplay)) {
+                player.addPassenger(textDisplay);
+            }
+            return;
+        }
+
+        if (existing != null) {
+            existing.remove();
+        }
+        state.afkDisplayEntityId = createAfkDisplay(player).getUniqueId();
+    }
+
     private void removeAfkDisplay(AfkState state) {
+        if (state.afkDisplayEntityId == null) {
+            return;
+        }
+
         Entity display = Bukkit.getEntity(state.afkDisplayEntityId);
         if (display != null) {
             display.remove();
         }
+        state.afkDisplayEntityId = null;
     }
 
     private void loadAndValidateConfig() {
         saveDefaultConfig();
-        getConfig().options().copyDefaults(true);
+        settings = readAndPersistConfig();
+    }
 
-        invincibleAfterSeconds = readNonNegativeSeconds(
-                "invincible-after-seconds",
-                DEFAULT_INVINCIBLE_AFTER_SECONDS
-        );
-        toggleCooldownSeconds = readNonNegativeSeconds(
-                "toggle-cooldown-seconds",
-                DEFAULT_TOGGLE_COOLDOWN_SECONDS
-        );
+    private AfkSettings readAndPersistConfig() {
+        getConfig().options().copyDefaults(true);
+        AfkSettings loadedSettings = AfkSettings.load(getConfig(), getLogger());
 
         // Persist newly introduced defaults and any corrected invalid values.
         saveConfig();
+        return loadedSettings;
     }
 
-    private int readNonNegativeSeconds(String path, int safeDefault) {
-        Object configured = getConfig().get(path);
-        if (configured instanceof Number number) {
-            double decimalValue = number.doubleValue();
-            long wholeValue = number.longValue();
-            if (Double.isFinite(decimalValue)
-                    && decimalValue == wholeValue
-                    && wholeValue >= 0L
-                    && wholeValue <= Integer.MAX_VALUE) {
-                return (int) wholeValue;
-            }
+    private void reloadPluginConfig(CommandSender sender) {
+        File configFile = new File(getDataFolder(), "config.yml");
+        YamlConfiguration syntaxCheck = new YamlConfiguration();
+
+        try {
+            syntaxCheck.load(configFile);
+        } catch (IOException | InvalidConfigurationException exception) {
+            getLogger().warning("Could not reload config.yml: " + exception.getMessage());
+            sender.sendMessage(message("messages.reload-failed", null));
+            return;
         }
 
-        getLogger().warning(
-                "Invalid " + path + " value '" + configured
-                        + "'; using the safe default of " + safeDefault + " seconds."
-        );
-        getConfig().set(path, safeDefault);
-        return safeDefault;
+        AfkSettings previousSettings = settings;
+        reloadConfig();
+        settings = readAndPersistConfig();
+        applyReloadedSettings(previousSettings);
+        sender.sendMessage(message("messages.reload-success", null));
+    }
+
+    private void applyReloadedSettings(AfkSettings previousSettings) {
+        restartAutomaticAfkTask();
+        boolean protectionChanged = !settings.protectionPolicyEquals(previousSettings);
+
+        for (UUID playerId : List.copyOf(afkPlayers.keySet())) {
+            Player player = Bukkit.getPlayer(playerId);
+            AfkState state = afkPlayers.get(playerId);
+            if (player == null || state == null) {
+                continue;
+            }
+
+            if (!settings.allowsAfkWorld(player.getWorld().getName())) {
+                setAfk(player, false, false);
+                player.sendMessage(message("messages.afk-cleared-world", player));
+                continue;
+            }
+
+            if (protectionChanged) {
+                configureProtection(player, state, System.nanoTime(), false);
+            }
+
+            refreshTabIndicator(player, state);
+            refreshAfkDisplay(player, state);
+        }
     }
 
     private void cleanupLegacyAfkTeams() {
@@ -640,26 +987,35 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private void cancelAfkAction(Player player, Cancellable event) {
         if (isAfk(player)) {
             event.setCancelled(true);
+        } else {
+            recordActivity(player);
         }
     }
 
     private Component message(String path, Player player) {
-        return format(path, player);
+        return messageWithValues(
+                path,
+                player == null ? Map.of() : Map.of("player", player.getName())
+        );
     }
 
     private Component messageWithSeconds(String path, Player player, int seconds) {
-        String raw = configString(path);
+        Map<String, String> values = new HashMap<>();
+        values.put("seconds", String.valueOf(seconds));
         if (player != null) {
-            raw = raw.replace("%player%", player.getName());
+            values.put("player", player.getName());
         }
-        raw = raw.replace("%seconds%", String.valueOf(seconds));
-        return legacy.deserialize(raw);
+        return messageWithValues(path, values);
     }
 
     private Component format(String path, Player player) {
+        return message(path, player);
+    }
+
+    private Component messageWithValues(String path, Map<String, String> values) {
         String raw = configString(path);
-        if (player != null) {
-            raw = raw.replace("%player%", player.getName());
+        for (Map.Entry<String, String> value : values.entrySet()) {
+            raw = raw.replace("%" + value.getKey() + "%", value.getValue());
         }
         return legacy.deserialize(raw);
     }
@@ -696,22 +1052,22 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private static final class AfkState {
         private final Location lockLocation;
+        private final long enteredAtNanos;
         private Component originalPlayerListName;
         private Component appliedPlayerListName;
-        private final UUID afkDisplayEntityId;
-        private long protectionDeadlineNanos = -1L;
+        private UUID afkDisplayEntityId;
+        private long protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+        private boolean tabIndicatorApplied = false;
         private boolean invincible = false;
 
         private AfkState(
                 Location lockLocation,
                 Component originalPlayerListName,
-                Component appliedPlayerListName,
-                UUID afkDisplayEntityId
+                long enteredAtNanos
         ) {
             this.lockLocation = lockLocation;
             this.originalPlayerListName = originalPlayerListName;
-            this.appliedPlayerListName = appliedPlayerListName;
-            this.afkDisplayEntityId = afkDisplayEntityId;
+            this.enteredAtNanos = enteredAtNanos;
         }
     }
 }

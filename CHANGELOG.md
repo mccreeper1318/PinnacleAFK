@@ -6,11 +6,16 @@ All notable changes to PinnacleAFK are documented in this file.
 
 ### Added
 
+- Added the permission-protected `/pafk reload` command, which rejects malformed YAML and safely reapplies validated runtime, display, protection, and automatic-AFK settings ([#13](https://github.com/mccreeper1318/PinnacleAFK/issues/13)).
+- Added an automated JUnit regression suite covering configuration migration and validation, elapsed-time deadlines, cooldowns, administrator command parsing, world policies, and ownership-safe display restoration ([#14](https://github.com/mccreeper1318/PinnacleAFK/issues/14)).
 - Added GitHub Actions validation that builds and tests the plugin on every push and pull request, verifies the packaged descriptor and resources, and uploads the JAR with its checksum ([#15](https://github.com/mccreeper1318/PinnacleAFK/issues/15)).
 - Added an automated release workflow that validates release tags, builds with Java 25, and attaches the versioned plugin JAR and SHA-256 checksum to published GitHub releases ([#18](https://github.com/mccreeper1318/PinnacleAFK/issues/18)).
 - Added this changelog to document release history, fixes, configuration changes, and compatibility updates ([#19](https://github.com/mccreeper1318/PinnacleAFK/issues/19)).
 - Added an MIT license ([#20](https://github.com/mccreeper1318/PinnacleAFK/issues/20)).
 - Added repository exclusions for Gradle outputs, IDE metadata, local settings, and generated server files ([#21](https://github.com/mccreeper1318/PinnacleAFK/issues/21)).
+- Added `/pafk list`, `/pafk status <player>`, and `/pafk remove <player>` for permission-protected AFK administration and troubleshooting ([#23](https://github.com/mccreeper1318/PinnacleAFK/issues/23)).
+- Added disabled-by-default automatic AFK detection with a configurable inactivity duration and activity tracking for movement, commands, chat, and ordinary player actions ([#24](https://github.com/mccreeper1318/PinnacleAFK/issues/24)).
+- Added configuration controls for broadcasts, AFK-enabled worlds, protection enablement, world and permission eligibility, and independent tab-list and above-head indicators ([#25](https://github.com/mccreeper1318/PinnacleAFK/issues/25)).
 
 ### Changed
 
