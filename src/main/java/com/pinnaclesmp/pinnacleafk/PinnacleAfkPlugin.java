@@ -165,7 +165,13 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
         AfkState state = afkPlayers.get(player.getUniqueId());
         if (state == null) {
-            if (!samePosition(event.getFrom(), to)) {
+            if (!samePosition(event.getFrom(), to)
+                    || AfkMovement.viewChanged(
+                            event.getFrom().getYaw(),
+                            event.getFrom().getPitch(),
+                            to.getYaw(),
+                            to.getPitch()
+                    )) {
                 recordActivity(player);
             }
             return;

@@ -12,7 +12,6 @@ commands:
   pafk:
     description: Reload PinnacleAFK or manage online AFK players.
     usage: /pafk <reload|list|status|remove> [player]
-    permission: pinnacleafk.admin
 permissions:
   pinnacleafk.use:
     description: Allows a player to use /afk.
