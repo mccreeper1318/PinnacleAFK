@@ -678,9 +678,24 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             long now,
             boolean notify
     ) {
-        if (state.invincible
-                || !isProtectionEligible(player)
-                || !AfkTiming.isDue(now, state.protectionDeadlineNanos)) {
+        if (!isProtectionEligible(player)) {
+            state.invincible = false;
+            state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+            return;
+        }
+
+        if (state.invincible) {
+            return;
+        }
+
+        if (state.protectionDeadlineNanos == AfkTiming.NO_DEADLINE) {
+            state.protectionDeadlineNanos = AfkTiming.deadlineFrom(
+                    state.enteredAtNanos,
+                    settings.invincibleAfterSeconds()
+            );
+        }
+
+        if (!AfkTiming.isDue(now, state.protectionDeadlineNanos)) {
             return;
         }
 
