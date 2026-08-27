@@ -1,9 +1,14 @@
-# How many seconds after typing /afk before the player becomes invincible.
-# Set to 0 for instant invincibility.
+# How many real elapsed seconds after typing /afk before the player becomes invincible.
+# Set to 0 for instant invincibility. Invalid values are reset to 10.
 invincible-after-seconds: 10
+
+# Minimum real elapsed seconds between a player's /afk toggles.
+# Set to 0 to disable the cooldown. Invalid values are reset to 3.
+toggle-cooldown-seconds: 3
 
 # PinnacleAFK formats the tab-list name directly and uses a floating text marker
 # above the player. It never moves the player out of their real scoreboard team.
+# In tab-format, %player% inserts the player's current formatted tab-list component.
 display:
   tab-format: "&7[AFK] &f%player%"
   nametag-prefix: "&7[AFK] &f"
@@ -16,4 +21,5 @@ messages:
   broadcast-no-longer-afk: "&a%player% is no longer AFK."
   invincible-now: "&bYou are now protected from all damage while AFK."
   already-protected-delay: "&7You will become damage-proof in &f%seconds%s&7."
+  toggle-cooldown: "&cPlease wait &f%seconds%s &cbefore toggling AFK again."
   only-player: "&cOnly players can use this command."
