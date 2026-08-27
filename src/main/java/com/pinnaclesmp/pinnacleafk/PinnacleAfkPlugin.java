@@ -27,6 +27,7 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityPickupItemEvent;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCreativeEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
@@ -46,6 +47,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
+import org.bukkit.util.Transformation;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -57,7 +59,7 @@ import java.util.UUID;
 
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
-    private static final double AFK_MARKER_HEIGHT_OFFSET = 2.6D;
+    private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
@@ -242,6 +244,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    // InventoryCreativeEvent has its own handler list and must be handled separately.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInventoryCreative(InventoryCreativeEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onInventoryDrag(InventoryDragEvent event) {
         if (event.getWhoClicked() instanceof Player player) {
@@ -378,12 +388,17 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private TextDisplay createAfkDisplay(Player player) {
-        Location displayLocation = player.getLocation().clone().add(0.0D, AFK_MARKER_HEIGHT_OFFSET, 0.0D);
+        Location displayLocation = player.getLocation().clone();
         Component marker = format("display.nametag-prefix", player)
                 .append(format("display.nametag-suffix", player));
 
         TextDisplay display = player.getWorld().spawn(displayLocation, TextDisplay.class, spawnedDisplay -> {
             spawnedDisplay.text(marker);
+
+            Transformation transformation = spawnedDisplay.getTransformation();
+            transformation.getTranslation().set(0.0F, AFK_MARKER_HEIGHT_OFFSET, 0.0F);
+            spawnedDisplay.setTransformation(transformation);
+
             spawnedDisplay.setBillboard(Display.Billboard.CENTER);
             spawnedDisplay.setAlignment(TextDisplay.TextAlignment.CENTER);
             spawnedDisplay.setDefaultBackground(false);
