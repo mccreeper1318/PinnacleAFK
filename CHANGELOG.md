@@ -17,6 +17,7 @@ All notable changes to PinnacleAFK are documented in this file.
 ### Fixed
 
 - Prevented AFK players from attacking entities, launching projectiles, breaking or placing blocks, using or moving items, and interacting with entities or inventories ([#1](https://github.com/mccreeper1318/PinnacleAFK/issues/1)).
+- Blocked teleports and portals while AFK and safely clear AFK state if an external world change still succeeds, preventing stale cross-world movement locks ([#2](https://github.com/mccreeper1318/PinnacleAFK/issues/2)).
 
 ## [1.0.2] - 2026-06-26
 
