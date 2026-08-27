@@ -76,6 +76,8 @@ messages:
   only-player: "&cOnly players can use this command."
 ```
 
+In `display.tab-format`, `%player%` inserts the player's current formatted tab-list component rather than just their username. PinnacleAFK reconciles changes made by rank or tab-list plugins while the player is AFK and restores the latest external value only when it still owns the displayed name.
+
 The `nametag-prefix` and `nametag-suffix` values form a floating marker displayed above the player's normal name tag. PinnacleAFK uses this marker instead of a scoreboard-team prefix, so entering AFK does not change team membership, friendly-fire rules, collision behavior, or team selectors.
 
 ## Team preservation in 26.2-1.1.0

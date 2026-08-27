@@ -27,6 +27,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Cleared AFK state on death with a respawn failsafe, cancelling delayed protection, removing the marker, restoring the tab-list name, and preventing stale death-location locks ([#5](https://github.com/mccreeper1318/PinnacleAFK/issues/5)).
 - Preserved team changes made by rank and scoreboard plugins while players are AFK by removing AFK ownership and stale restoration of scoreboard-team membership ([#6](https://github.com/mccreeper1318/PinnacleAFK/issues/6)).
 - Made AFK indicators independent of main, per-player, and viewer-specific scoreboards by using a floating display and direct tab-list formatting, preventing custom scoreboard plugins from hiding or misformatting AFK status ([#7](https://github.com/mccreeper1318/PinnacleAFK/issues/7)).
+- Preserved custom tab-list components when applying the AFK indicator, reconciled formatting changes made by other plugins while AFK, and avoided restoring stale values ([#8](https://github.com/mccreeper1318/PinnacleAFK/issues/8)).
 
 ## [1.0.2] - 2026-06-26
 

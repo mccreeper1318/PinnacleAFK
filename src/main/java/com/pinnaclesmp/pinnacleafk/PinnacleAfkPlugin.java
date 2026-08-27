@@ -55,6 +55,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -66,6 +67,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
+    private int tabReconcileTaskId = -1;
 
     @Override
     public void onEnable() {
@@ -83,6 +85,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @Override
     public void onDisable() {
+        stopTabReconcileTask();
+
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (isAfk(player)) {
                 setAfk(player, false, false);
@@ -312,19 +316,24 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         TextDisplay afkDisplay = createAfkDisplay(player);
+        Component originalPlayerListName = player.playerListName();
+        Component basePlayerListName = playerListNameOrUsername(player, originalPlayerListName);
+        Component appliedPlayerListName = formatPlayerListName(basePlayerListName);
         AfkState state = new AfkState(
                 player.getLocation().clone(),
-                player.playerListName(),
+                originalPlayerListName,
+                appliedPlayerListName,
                 afkDisplay.getUniqueId()
         );
 
         afkPlayers.put(player.getUniqueId(), state);
+        ensureTabReconcileTask();
 
         // Stop actions that began before the player entered AFK mode.
         player.clearActiveItem();
         player.closeInventory();
 
-        player.playerListName(format("display.tab-format", player));
+        player.playerListName(appliedPlayerListName);
 
         int delaySeconds = Math.max(0, getConfig().getInt("invincible-after-seconds", 10));
         if (delaySeconds <= 0) {
@@ -363,7 +372,10 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         removeAfkDisplay(state);
-        player.playerListName(state.originalPlayerListName);
+        if (Objects.equals(player.playerListName(), state.appliedPlayerListName)) {
+            player.playerListName(state.originalPlayerListName);
+        }
+        stopTabReconcileTaskIfIdle();
 
         if (notify) {
             player.sendMessage(message("messages.no-longer-afk", player));
@@ -375,6 +387,75 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         for (Player onlinePlayer : Bukkit.getOnlinePlayers()) {
             onlinePlayer.sendMessage(component);
         }
+    }
+
+    private void ensureTabReconcileTask() {
+        if (tabReconcileTaskId != -1) {
+            return;
+        }
+
+        tabReconcileTaskId = Bukkit.getScheduler()
+                .runTaskTimer(this, this::reconcilePlayerListNames, 1L, 1L)
+                .getTaskId();
+    }
+
+    private void stopTabReconcileTaskIfIdle() {
+        if (afkPlayers.isEmpty()) {
+            stopTabReconcileTask();
+        }
+    }
+
+    private void stopTabReconcileTask() {
+        if (tabReconcileTaskId == -1) {
+            return;
+        }
+
+        Bukkit.getScheduler().cancelTask(tabReconcileTaskId);
+        tabReconcileTaskId = -1;
+    }
+
+    private void reconcilePlayerListNames() {
+        for (Map.Entry<UUID, AfkState> entry : afkPlayers.entrySet()) {
+            Player player = Bukkit.getPlayer(entry.getKey());
+            if (player == null) {
+                continue;
+            }
+
+            AfkState state = entry.getValue();
+            Component currentPlayerListName = player.playerListName();
+            if (Objects.equals(currentPlayerListName, state.appliedPlayerListName)) {
+                continue;
+            }
+
+            // Treat a value PinnacleAFK did not apply as the latest formatting owned
+            // by the server or another plugin, then wrap it with the AFK indicator.
+            state.originalPlayerListName = currentPlayerListName;
+            state.appliedPlayerListName = formatPlayerListName(
+                    playerListNameOrUsername(player, currentPlayerListName)
+            );
+            player.playerListName(state.appliedPlayerListName);
+        }
+    }
+
+    private Component playerListNameOrUsername(Player player, Component playerListName) {
+        return playerListName != null ? playerListName : Component.text(player.getName());
+    }
+
+    private Component formatPlayerListName(Component playerListName) {
+        String raw = getConfig().getString("display.tab-format", "&7[AFK] &f%player%");
+        String placeholder = "%player%";
+        Component result = Component.empty();
+        int cursor = 0;
+        int placeholderIndex;
+
+        while ((placeholderIndex = raw.indexOf(placeholder, cursor)) >= 0) {
+            result = result
+                    .append(legacy.deserialize(raw.substring(cursor, placeholderIndex)))
+                    .append(playerListName);
+            cursor = placeholderIndex + placeholder.length();
+        }
+
+        return result.append(legacy.deserialize(raw.substring(cursor)));
     }
 
     private TextDisplay createAfkDisplay(Player player) {
@@ -498,14 +579,21 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private static final class AfkState {
         private final Location lockLocation;
-        private final Component originalPlayerListName;
+        private Component originalPlayerListName;
+        private Component appliedPlayerListName;
         private final UUID afkDisplayEntityId;
         private int invincibleTaskId = -1;
         private boolean invincible = false;
 
-        private AfkState(Location lockLocation, Component originalPlayerListName, UUID afkDisplayEntityId) {
+        private AfkState(
+                Location lockLocation,
+                Component originalPlayerListName,
+                Component appliedPlayerListName,
+                UUID afkDisplayEntityId
+        ) {
             this.lockLocation = lockLocation;
             this.originalPlayerListName = originalPlayerListName;
+            this.appliedPlayerListName = appliedPlayerListName;
             this.afkDisplayEntityId = afkDisplayEntityId;
         }
     }

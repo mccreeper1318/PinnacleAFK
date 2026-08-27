@@ -4,6 +4,7 @@ invincible-after-seconds: 10
 
 # PinnacleAFK formats the tab-list name directly and uses a floating text marker
 # above the player. It never moves the player out of their real scoreboard team.
+# In tab-format, %player% inserts the player's current formatted tab-list component.
 display:
   tab-format: "&7[AFK] &f%player%"
   nametag-prefix: "&7[AFK] &f"
