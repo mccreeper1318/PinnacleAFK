@@ -42,9 +42,15 @@ The versioned JAR will be created in:
 build/libs/PinnacleAFK-<version>.jar
 ```
 
+Every push and pull request is also built and tested by GitHub Actions. Successful workflow runs provide the verified plugin JAR and its SHA-256 checksum as downloadable artifacts.
+
+## Automated releases
+
+Publishing a GitHub release with a tag matching the Gradle project version automatically builds the tagged source and attaches the versioned plugin JAR and its SHA-256 checksum. The release workflow accepts tags with or without a leading `v` and validates prerelease tags against the GitHub release type.
+
 ## Install
 
-1. Build the plugin.
+1. Build the plugin or download a JAR from a successful workflow or GitHub release.
 2. Put the JAR into your server's `plugins` folder.
 3. Start or restart the Paper server.
 4. Edit `plugins/PinnacleAFK/config.yml` if needed.
