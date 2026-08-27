@@ -10,17 +10,44 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.PluginCommand;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Display;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
+import org.bukkit.entity.TextDisplay;
+import org.bukkit.event.Cancellable;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockDamageEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityPickupItemEvent;
+import org.bukkit.event.entity.ProjectileLaunchEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
+import org.bukkit.event.inventory.InventoryCreativeEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryOpenEvent;
+import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
+import org.bukkit.event.player.PlayerDropItemEvent;
+import org.bukkit.event.player.PlayerFishEvent;
+import org.bukkit.event.player.PlayerInteractAtEntityEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerItemConsumeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.player.PlayerPortalEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
+import org.bukkit.util.Transformation;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -29,10 +56,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
-    private static final String AFK_TEAM_PREFIX = "pafk_";
+    private static final Pattern LEGACY_PER_PLAYER_AFK_TEAM_NAME = Pattern.compile("^pafk_[0-9a-f]{11}$");
+    private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
@@ -40,7 +69,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @Override
     public void onEnable() {
         saveDefaultConfig();
-        cleanupLegacySharedAfkTeam();
+        cleanupLegacyAfkTeams();
 
         Bukkit.getPluginManager().registerEvents(this, this);
 
@@ -103,6 +132,163 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerTeleport(PlayerTeleportEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    // PlayerPortalEvent has its own handler list and must be handled separately.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerPortal(PlayerPortalEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
+        Player player = event.getPlayer();
+        if (isAfk(player)) {
+            // A world change that bypassed the cancellable teleport events cannot safely
+            // retain a lock location from the previous world.
+            setAfk(player, false, true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPlayerRespawn(PlayerRespawnEvent event) {
+        Player player = event.getPlayer();
+        AfkState state = afkPlayers.get(player.getUniqueId());
+        if (state == null) {
+            return;
+        }
+
+        state.lockLocation = event.getRespawnLocation().clone();
+
+        // Respawning can dismount the display. Wait until the player has fully respawned,
+        // then replace and reattach the marker at the actual destination.
+        Bukkit.getScheduler().runTask(this, () -> {
+            AfkState currentState = afkPlayers.get(player.getUniqueId());
+            if (currentState != state || !player.isOnline()) {
+                return;
+            }
+
+            currentState.lockLocation = player.getLocation().clone();
+            removeAfkDisplay(currentState);
+            currentState.afkDisplayEntityId = createAfkDisplay(player).getUniqueId();
+        });
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerInteractEntity(PlayerInteractEntityEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    // PlayerInteractAtEntityEvent has its own handler list and must be handled separately.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerInteractAtEntity(PlayerInteractAtEntityEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerArmorStandManipulate(PlayerArmorStandManipulateEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onBlockDamage(BlockDamageEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onBlockBreak(BlockBreakEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onBlockPlace(BlockPlaceEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onAfkPlayerDamageEntity(EntityDamageByEntityEvent event) {
+        Entity damager = event.getDamager();
+        if (damager instanceof Player player) {
+            cancelAfkAction(player, event);
+            return;
+        }
+
+        if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onProjectileLaunch(ProjectileLaunchEvent event) {
+        if (event.getEntity().getShooter() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInventoryOpen(InventoryOpenEvent event) {
+        if (event.getPlayer() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    // InventoryCreativeEvent has its own handler list and must be handled separately.
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInventoryCreative(InventoryCreativeEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerItemConsume(PlayerItemConsumeEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerDropItem(PlayerDropItemEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onEntityPickupItem(EntityPickupItemEvent event) {
+        if (event.getEntity() instanceof Player player) {
+            cancelAfkAction(player, event);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerSwapHandItems(PlayerSwapHandItemsEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerFish(PlayerFishEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onEntityDamage(EntityDamageEvent event) {
         Entity entity = event.getEntity();
         if (!(entity instanceof Player player)) {
@@ -137,35 +323,20 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        String entry = player.getName();
-        Team previousTeam = scoreboard.getEntryTeam(entry);
-        String temporaryTeamName = temporaryAfkTeamName(player);
-
-        Team existingTemporaryTeam = scoreboard.getTeam(temporaryTeamName);
-        if (existingTemporaryTeam != null) {
-            existingTemporaryTeam.unregister();
-        }
-
-        Team afkTeam = scoreboard.registerNewTeam(temporaryTeamName);
-        setupTemporaryAfkTeam(player, previousTeam, afkTeam);
-
+        TextDisplay afkDisplay = createAfkDisplay(player);
         AfkState state = new AfkState(
                 player.getLocation().clone(),
                 player.playerListName(),
-                previousTeam == null ? null : previousTeam.getName(),
-                temporaryTeamName,
-                getConfig().getBoolean("display.use-player-list-name", false)
+                afkDisplay.getUniqueId()
         );
 
         afkPlayers.put(player.getUniqueId(), state);
 
-        // Adding the entry automatically removes it from the old team on this scoreboard.
-        afkTeam.addEntry(entry);
+        // Stop actions that began before the player entered AFK mode.
+        player.clearActiveItem();
+        player.closeInventory();
 
-        if (state.usedPlayerListName) {
-            player.playerListName(format("display.tab-format", player));
-        }
+        player.playerListName(format("display.tab-format", player));
 
         int delaySeconds = Math.max(0, getConfig().getInt("invincible-after-seconds", 10));
         if (delaySeconds <= 0) {
@@ -203,28 +374,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             Bukkit.getScheduler().cancelTask(state.invincibleTaskId);
         }
 
-        Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        String entry = player.getName();
-
-        Team temporaryAfkTeam = scoreboard.getTeam(state.temporaryTeamName);
-        if (temporaryAfkTeam != null) {
-            temporaryAfkTeam.removeEntry(entry);
-        }
-
-        if (state.previousTeamName != null) {
-            Team previousTeam = scoreboard.getTeam(state.previousTeamName);
-            if (previousTeam != null) {
-                previousTeam.addEntry(entry);
-            }
-        }
-
-        if (temporaryAfkTeam != null) {
-            temporaryAfkTeam.unregister();
-        }
-
-        if (state.usedPlayerListName) {
-            player.playerListName(state.originalPlayerListName);
-        }
+        removeAfkDisplay(state);
+        player.playerListName(state.originalPlayerListName);
 
         if (notify) {
             player.sendMessage(message("messages.no-longer-afk", player));
@@ -238,58 +389,83 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
-    private void setupTemporaryAfkTeam(Player player, Team previousTeam, Team afkTeam) {
-        Component afkPrefix = format("display.nametag-prefix", player);
-        Component afkSuffix = format("display.nametag-suffix", player);
+    private TextDisplay createAfkDisplay(Player player) {
+        Location displayLocation = player.getLocation().clone();
+        Component marker = format("display.nametag-prefix", player)
+                .append(format("display.nametag-suffix", player));
 
-        if (previousTeam == null) {
-            afkTeam.prefix(afkPrefix);
-            afkTeam.suffix(afkSuffix);
-            return;
+        TextDisplay display = player.getWorld().spawn(displayLocation, TextDisplay.class, spawnedDisplay -> {
+            spawnedDisplay.text(marker);
+
+            Transformation transformation = spawnedDisplay.getTransformation();
+            transformation.getTranslation().set(0.0F, AFK_MARKER_HEIGHT_OFFSET, 0.0F);
+            spawnedDisplay.setTransformation(transformation);
+
+            spawnedDisplay.setBillboard(Display.Billboard.CENTER);
+            spawnedDisplay.setAlignment(TextDisplay.TextAlignment.CENTER);
+            spawnedDisplay.setDefaultBackground(false);
+            spawnedDisplay.setSeeThrough(true);
+            spawnedDisplay.setShadowed(true);
+            spawnedDisplay.setGravity(false);
+            spawnedDisplay.setInvulnerable(true);
+            spawnedDisplay.setPersistent(false);
+            spawnedDisplay.setSilent(true);
+        });
+
+        player.addPassenger(display);
+        return display;
+    }
+
+    private void removeAfkDisplay(AfkState state) {
+        Entity display = Bukkit.getEntity(state.afkDisplayEntityId);
+        if (display != null) {
+            display.remove();
         }
-
-        copyTeamSettings(previousTeam, afkTeam);
-        afkTeam.prefix(previousTeam.prefix().append(afkPrefix));
-        afkTeam.suffix(afkSuffix.append(previousTeam.suffix()));
     }
 
-    private void copyTeamSettings(Team source, Team target) {
-        target.displayName(source.displayName());
-        target.setAllowFriendlyFire(source.allowFriendlyFire());
-        target.setCanSeeFriendlyInvisibles(source.canSeeFriendlyInvisibles());
-        target.setColor(source.getColor());
-
-        for (Team.Option option : Team.Option.values()) {
-            target.setOption(option, source.getOption(option));
-        }
-    }
-
-    private String temporaryAfkTeamName(Player player) {
-        String compactUuid = player.getUniqueId().toString().replace("-", "");
-        return AFK_TEAM_PREFIX + compactUuid.substring(0, 11);
-    }
-
-    private void cleanupLegacySharedAfkTeam() {
+    private void cleanupLegacyAfkTeams() {
         Scoreboard scoreboard = Bukkit.getScoreboardManager().getMainScoreboard();
-        Team legacyTeam = scoreboard.getTeam(LEGACY_SHARED_AFK_TEAM_NAME);
-        if (legacyTeam == null) {
-            return;
-        }
 
-        Set<String> legacyEntries = new HashSet<>(legacyTeam.getEntries());
-        legacyTeam.unregister();
+        Team legacySharedTeam = scoreboard.getTeam(LEGACY_SHARED_AFK_TEAM_NAME);
+        if (legacySharedTeam != null) {
+            Set<String> legacyEntries = new HashSet<>(legacySharedTeam.getEntries());
+            legacySharedTeam.unregister();
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (legacyEntries.contains(player.getName())) {
-                player.playerListName(null);
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (legacyEntries.contains(player.getName())) {
+                    player.playerListName(null);
+                }
             }
+
+            getLogger().info("Removed legacy shared AFK scoreboard team from older PinnacleAFK versions.");
         }
 
-        getLogger().info("Removed legacy shared AFK scoreboard team from older PinnacleAFK versions.");
+        int removedPerPlayerTeams = 0;
+        for (Team team : new HashSet<>(scoreboard.getTeams())) {
+            if (!LEGACY_PER_PLAYER_AFK_TEAM_NAME.matcher(team.getName()).matches()) {
+                continue;
+            }
+
+            team.unregister();
+            removedPerPlayerTeams++;
+        }
+
+        if (removedPerPlayerTeams > 0) {
+            getLogger().info(
+                    "Removed " + removedPerPlayerTeams
+                            + " legacy per-player AFK scoreboard team(s) left by older PinnacleAFK versions."
+            );
+        }
     }
 
     private boolean isAfk(Player player) {
         return afkPlayers.containsKey(player.getUniqueId());
+    }
+
+    private void cancelAfkAction(Player player, Cancellable event) {
+        if (isAfk(player)) {
+            event.setCancelled(true);
+        }
     }
 
     private Component message(String path, Player player) {
@@ -327,20 +503,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private static final class AfkState {
-        private final Location lockLocation;
+        private Location lockLocation;
         private final Component originalPlayerListName;
-        private final String previousTeamName;
-        private final String temporaryTeamName;
-        private final boolean usedPlayerListName;
+        private UUID afkDisplayEntityId;
         private int invincibleTaskId = -1;
         private boolean invincible = false;
 
-        private AfkState(Location lockLocation, Component originalPlayerListName, String previousTeamName, String temporaryTeamName, boolean usedPlayerListName) {
+        private AfkState(Location lockLocation, Component originalPlayerListName, UUID afkDisplayEntityId) {
             this.lockLocation = lockLocation;
             this.originalPlayerListName = originalPlayerListName;
-            this.previousTeamName = previousTeamName;
-            this.temporaryTeamName = temporaryTeamName;
-            this.usedPlayerListName = usedPlayerListName;
+            this.afkDisplayEntityId = afkDisplayEntityId;
         }
     }
 }

@@ -2,13 +2,9 @@
 # Set to 0 for instant invincibility.
 invincible-after-seconds: 10
 
-# By default, PinnacleAFK uses the AFK scoreboard team to show AFK in both the tab list
-# and the name tag above the player's head. This preserves existing team prefixes.
-#
-# Only set use-player-list-name to true if you specifically want PinnacleAFK to override
-# the player's tab-list name while AFK. Keeping it false is safest with rank/team plugins.
+# PinnacleAFK formats the tab-list name directly and uses a floating text marker
+# above the player. It never moves the player out of their real scoreboard team.
 display:
-  use-player-list-name: false
   tab-format: "&7[AFK] &f%player%"
   nametag-prefix: "&7[AFK] &f"
   nametag-suffix: ""

@@ -1,5 +1,5 @@
 name: PinnacleAFK
-version: 1.0.2
+version: '${version}'
 main: com.pinnaclesmp.pinnacleafk.PinnacleAfkPlugin
 description: Adds a manual AFK toggle with tab/name tag markers, movement lock, and delayed invincibility.
 author: PinnacleSMP
