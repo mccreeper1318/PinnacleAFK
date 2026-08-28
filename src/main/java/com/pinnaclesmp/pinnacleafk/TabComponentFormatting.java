@@ -28,7 +28,7 @@ final class TabComponentFormatting {
             gray = selector.separator(grayRecursively(selector.separator()));
         }
 
-        if (gray instanceof NBTComponent<?, ?> nbt && nbt.separator() != null) {
+        if (gray instanceof NBTComponent<?> nbt && nbt.separator() != null) {
             gray = nbt.separator(grayRecursively(nbt.separator()));
         }
 
