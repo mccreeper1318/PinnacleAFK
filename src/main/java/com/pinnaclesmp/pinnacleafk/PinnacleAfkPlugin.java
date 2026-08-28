@@ -379,10 +379,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         lastToggleNanos.remove(player.getUniqueId());
-        lastActivityNanos.remove(player.getUniqueId());
         if (isAfk(player)) {
             setAfk(player, false, false);
         }
+
+        // disableAfk records activity, so this cleanup must happen afterward.
+        lastActivityNanos.remove(player.getUniqueId());
     }
 
     private void registerCommand(String commandName) {
