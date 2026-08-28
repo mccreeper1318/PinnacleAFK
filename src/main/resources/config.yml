@@ -29,11 +29,12 @@ automatic-afk:
 
 # PinnacleAFK formats the tab-list name directly and uses a floating text marker
 # above the player. It never moves the player out of their real scoreboard team.
-# In tab-format, %player% inserts the player's current formatted tab-list component.
+# In tab-format, %player% inserts the player's current tab-list component; PinnacleAFK
+# forces that component gray while AFK and restores the normal team-rendered name afterward.
 display:
   tab-enabled: true
   nametag-enabled: true
-  tab-format: "&7[AFK] &f%player%"
+  tab-format: "&7[AFK] %player%"
   nametag-prefix: "&7[AFK] &f"
   nametag-suffix: ""
 

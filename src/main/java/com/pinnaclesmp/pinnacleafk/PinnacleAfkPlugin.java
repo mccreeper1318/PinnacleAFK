@@ -2,6 +2,7 @@ package com.pinnaclesmp.pinnacleafk;
 
 import io.papermc.paper.event.player.AsyncChatEvent;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -178,14 +179,17 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         Location locked = state.lockLocation.clone();
-
-        if (samePosition(locked, to)) {
+        if (samePosition(locked, to)
+                && !AfkMovement.viewChanged(
+                        locked.getYaw(),
+                        locked.getPitch(),
+                        to.getYaw(),
+                        to.getPitch()
+                )) {
             return;
         }
 
-        // Keep the player locked in place, but still allow them to look around.
-        locked.setYaw(to.getYaw());
-        locked.setPitch(to.getPitch());
+        // AFK means fully frozen: position and view direction both stay at the saved location.
         event.setTo(locked);
     }
 
@@ -531,9 +535,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         long enteredAtNanos = System.nanoTime();
         AfkState state = new AfkState(
                 player.getLocation().clone(),
-                player.playerListName(),
                 enteredAtNanos
         );
+        captureOriginalPlayerListName(player, state);
 
         afkPlayers.put(player.getUniqueId(), state);
         ensureAfkReconcileTask();
@@ -773,25 +777,37 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
     }
 
+    private void captureOriginalPlayerListName(Player player, AfkState state) {
+        Component currentPlayerListName = player.playerListName();
+        state.originalPlayerListName = currentPlayerListName;
+        state.restoreDefaultPlayerListName = usesDefaultPlayerListName(player, currentPlayerListName);
+    }
+
+    private boolean usesDefaultPlayerListName(Player player, Component playerListName) {
+        return Objects.equals(playerListName, Component.text(player.getName()));
+    }
+
     private void reconcilePlayerListName(Player player, AfkState state) {
         if (!settings.tabIndicatorEnabled()) {
             removeTabIndicator(player, state);
-            state.originalPlayerListName = player.playerListName();
+            captureOriginalPlayerListName(player, state);
             return;
         }
 
         Component currentPlayerListName = player.playerListName();
         if (!state.tabIndicatorApplied) {
-            state.originalPlayerListName = currentPlayerListName;
+            captureOriginalPlayerListName(player, state);
         } else if (ValueOwnership.stillOwns(currentPlayerListName, state.appliedPlayerListName)) {
             return;
         } else {
             // A value PinnacleAFK did not apply belongs to the server or another plugin.
-            state.originalPlayerListName = currentPlayerListName;
+            captureOriginalPlayerListName(player, state);
         }
 
         state.appliedPlayerListName = formatPlayerListName(
-                playerListNameOrUsername(player, state.originalPlayerListName)
+                TabComponentFormatting.grayRecursively(
+                        playerListNameOrUsername(player, state.originalPlayerListName)
+                )
         );
         state.tabIndicatorApplied = true;
         player.playerListName(state.appliedPlayerListName);
@@ -799,7 +815,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void refreshTabIndicator(Player player, AfkState state) {
         removeTabIndicator(player, state);
-        state.originalPlayerListName = player.playerListName();
+        captureOriginalPlayerListName(player, state);
         reconcilePlayerListName(player, state);
     }
 
@@ -809,7 +825,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                         player.playerListName(),
                         state.appliedPlayerListName
                 )) {
-            player.playerListName(state.originalPlayerListName);
+            // A null player-list name restores Minecraft's normal username rendering,
+            // which allows the client's scoreboard team prefix/suffix/color to appear again.
+            player.playerListName(
+                    state.restoreDefaultPlayerListName ? null : state.originalPlayerListName
+            );
         }
 
         state.appliedPlayerListName = null;
@@ -1080,16 +1100,15 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         private Component appliedPlayerListName;
         private UUID afkDisplayEntityId;
         private long protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+        private boolean restoreDefaultPlayerListName = false;
         private boolean tabIndicatorApplied = false;
         private boolean invincible = false;
 
         private AfkState(
                 Location lockLocation,
-                Component originalPlayerListName,
                 long enteredAtNanos
         ) {
             this.lockLocation = lockLocation;
-            this.originalPlayerListName = originalPlayerListName;
             this.enteredAtNanos = enteredAtNanos;
         }
     }
