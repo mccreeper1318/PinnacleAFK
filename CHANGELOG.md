@@ -2,6 +2,14 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
+## [26.2-1.1.1] - 8/28/26
+
+### Hotfix
+
+- Fully locked AFK players to their saved position and view direction, preventing walking, drifting, or looking around while AFK.
+- Fixed tab-list restoration after leaving AFK so players using normal scoreboard team formatting return to their team prefix/color (such as `<NM>` or `<FM>`) instead of being left with a plain custom player-list name.
+- Changed the AFK tab display so the player's name is gray to match the gray `[AFK]` indicator while AFK.
+
 ## [26.2-1.1.0] - 8/27/26
 
 ### Added
