@@ -1,0 +1,43 @@
+# Gradle
+.gradle/
+build/
+out/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Eclipse
+.classpath
+.project
+.settings/
+
+# Visual Studio Code
+.vscode/
+
+# Local settings and secrets
+.env
+.env.*
+!.env.example
+local.properties
+
+# Generated development-server files
+run/
+server/
+plugins/
+logs/
+world/
+world_nether/
+world_the_end/
+eula.txt
+server.properties
+
+# Java crash logs
+hs_err_pid*
+replay_pid*
+
+# Operating-system files
+.DS_Store
+Thumbs.db
