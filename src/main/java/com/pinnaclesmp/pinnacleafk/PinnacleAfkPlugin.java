@@ -178,19 +178,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
-        Location locked = state.lockLocation.clone();
-        if (samePosition(locked, to)
-                && !AfkMovement.viewChanged(
-                        locked.getYaw(),
-                        locked.getPitch(),
-                        to.getYaw(),
-                        to.getPitch()
-                )) {
-            return;
-        }
-
-        // AFK means fully frozen: position and view direction both stay at the saved location.
-        event.setTo(locked);
+        // Paper explicitly returns a player to getFrom() when a move event is cancelled.
+        // Pin that origin to the saved AFK location so every movement packet, including
+        // stop/start walking and view changes, is corrected to the exact AFK position.
+        event.setFrom(state.lockLocation.clone());
+        event.setCancelled(true);
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)

@@ -2,6 +2,12 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
+## [26.2-1.1.2] - 8/28/26
+
+### Hotfix
+
+- Reworked the AFK movement lock to cancel movement packets against the saved AFK location and clear player velocity, preventing continuous walking or stop/start movement from drifting away before correction.
+
 ## [26.2-1.1.1] - 8/28/26
 
 ### Hotfix
