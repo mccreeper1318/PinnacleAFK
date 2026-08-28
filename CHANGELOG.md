@@ -2,7 +2,7 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
-## [26.2-1.1.0] - Unreleased
+## [26.2-1.1.0] - 8/27/26
 
 ### Added
 
