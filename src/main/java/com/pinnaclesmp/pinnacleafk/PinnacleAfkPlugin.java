@@ -805,7 +805,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         state.appliedPlayerListName = formatPlayerListName(
-                playerListNameOrUsername(player, state.originalPlayerListName).color(NamedTextColor.GRAY)
+                TabComponentFormatting.grayRecursively(
+                        playerListNameOrUsername(player, state.originalPlayerListName)
+                )
         );
         state.tabIndicatorApplied = true;
         player.playerListName(state.appliedPlayerListName);
