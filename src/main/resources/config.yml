@@ -47,6 +47,7 @@ messages:
   already-protected-delay: "&7You will become damage-proof in &f%seconds%s&7."
   toggle-cooldown: "&cPlease wait &f%seconds%s &cbefore toggling AFK again."
   world-not-allowed: "&cAFK mode is not allowed in this world."
+  cannot-dismount: "&cYou cannot enter AFK mode while you are still mounted. Dismount and try again."
   afk-cleared-world: "&cYour AFK status was cleared because this world is no longer allowed."
   only-player: "&cOnly players can use this command."
   no-permission: "&cYou do not have permission to use this command."

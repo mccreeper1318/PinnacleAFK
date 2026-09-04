@@ -2,6 +2,13 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
+## [26.2-1.1.3] - Unreleased
+
+### Fixed
+
+- Prevented mounted players from bypassing the AFK movement lock by dismounting them before the lock position is captured, correcting any later mounted/displaced AFK state, and treating vehicle or otherwise observed mounted movement as activity for automatic AFK detection ([#33](https://github.com/mccreeper1318/PinnacleAFK/issues/33)).
+- Refused manual and automatic AFK entry when a player remains mounted after both normal and fallback dismount attempts, preventing invalid AFK locks or protection and reporting the rejection to the player ([#37](https://github.com/mccreeper1318/PinnacleAFK/issues/37)).
+
 ## [26.2-1.1.2] - 8/28/26
 
 ### Hotfix

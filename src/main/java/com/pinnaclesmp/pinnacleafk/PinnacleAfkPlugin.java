@@ -49,6 +49,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -77,6 +78,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final Map<UUID, Long> lastToggleNanos = new HashMap<>();
     private final Map<UUID, Long> lastActivityNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastObservedLocations = new HashMap<>();
+    private final Set<UUID> afkCorrectionTeleports = new HashSet<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
     private AfkSettings settings;
     private int afkReconcileTaskId = -1;
@@ -106,6 +109,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         afkPlayers.clear();
         lastToggleNanos.clear();
         lastActivityNanos.clear();
+        lastObservedLocations.clear();
+        afkCorrectionTeleports.clear();
     }
 
     @Override
@@ -188,6 +193,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
+        if (afkCorrectionTeleports.contains(event.getPlayer().getUniqueId())) {
+            return;
+        }
         cancelAfkAction(event.getPlayer(), event);
     }
 
@@ -195,6 +203,17 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerPortal(PlayerPortalEvent event) {
         cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onVehicleMove(VehicleMoveEvent event) {
+        if (samePosition(event.getFrom(), event.getTo())) {
+            return;
+        }
+
+        for (Entity passenger : event.getVehicle().getPassengers()) {
+            handleMovingVehiclePassenger(passenger);
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -375,13 +394,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        lastToggleNanos.remove(player.getUniqueId());
+        UUID playerId = player.getUniqueId();
+        lastToggleNanos.remove(playerId);
         if (isAfk(player)) {
             setAfk(player, false, false);
         }
 
         // disableAfk records activity, so this cleanup must happen afterward.
-        lastActivityNanos.remove(player.getUniqueId());
+        lastActivityNanos.remove(playerId);
+        lastObservedLocations.remove(playerId);
+        afkCorrectionTeleports.remove(playerId);
     }
 
     private void registerCommand(String commandName) {
@@ -525,6 +547,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
+        // A mounted player can move without a reliable PlayerMoveEvent. Dismount first,
+        // then capture the lock location only after verifying the player actually detached.
+        if (!dismountForAfk(player)) {
+            recordActivity(player);
+            if (notify) {
+                player.sendMessage(message("messages.cannot-dismount", player));
+            }
+            return;
+        }
+
         long enteredAtNanos = System.nanoTime();
         AfkState state = new AfkState(
                 player.getLocation().clone(),
@@ -533,6 +565,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         captureOriginalPlayerListName(player, state);
 
         afkPlayers.put(player.getUniqueId(), state);
+        lastObservedLocations.put(player.getUniqueId(), state.lockLocation.clone());
         ensureAfkReconcileTask();
 
         // Stop actions that began before the player entered AFK mode.
@@ -646,8 +679,71 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             }
 
             AfkState state = entry.getValue();
+            enforceAfkLock(player, state);
             activateProtectionIfDue(player, state, now, true);
             reconcilePlayerListName(player, state);
+        }
+    }
+
+    private void enforceAfkLock(Player player, AfkState state) {
+        if (player.isInsideVehicle()) {
+            dismountForAfk(player);
+        }
+
+        Location current = player.getLocation();
+        if (!samePosition(current, state.lockLocation)
+                || AfkMovement.viewChanged(
+                        current.getYaw(),
+                        current.getPitch(),
+                        state.lockLocation.getYaw(),
+                        state.lockLocation.getPitch()
+                )) {
+            correctAfkPosition(player, state);
+            return;
+        }
+
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+    }
+
+    private boolean dismountForAfk(Player player) {
+        boolean dismounted = AfkDismount.attempt(
+                player::isInsideVehicle,
+                () -> player.leaveVehicle(),
+                () -> {
+                    Entity remainingVehicle = player.getVehicle();
+                    if (remainingVehicle != null) {
+                        remainingVehicle.removePassenger(player);
+                    }
+                }
+        );
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return dismounted;
+    }
+
+    private void correctAfkPosition(Player player, AfkState state) {
+        UUID playerId = player.getUniqueId();
+        afkCorrectionTeleports.add(playerId);
+        try {
+            player.teleport(state.lockLocation.clone(), PlayerTeleportEvent.TeleportCause.PLUGIN);
+        } finally {
+            afkCorrectionTeleports.remove(playerId);
+        }
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+    }
+
+    private void handleMovingVehiclePassenger(Entity passenger) {
+        if (passenger instanceof Player player) {
+            AfkState state = afkPlayers.get(player.getUniqueId());
+            if (state == null) {
+                recordActivity(player);
+            } else {
+                dismountForAfk(player);
+                correctAfkPosition(player, state);
+            }
+        }
+
+        for (Entity nestedPassenger : passenger.getPassengers()) {
+            handleMovingVehiclePassenger(nestedPassenger);
         }
     }
 
@@ -713,6 +809,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void restartAutomaticAfkTask() {
         stopAutomaticAfkTask();
+        lastObservedLocations.clear();
         if (!settings.automaticAfkEnabled()) {
             return;
         }
@@ -720,6 +817,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         long now = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             lastActivityNanos.putIfAbsent(player.getUniqueId(), now);
+            lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
         }
 
         automaticAfkTaskId = Bukkit.getScheduler()
@@ -744,8 +842,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         long now = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (isAfk(player)) {
+                lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
                 continue;
             }
+
+            recordObservedActivity(player);
 
             if (!settings.allowsAfkWorld(player.getWorld().getName())) {
                 lastActivityNanos.put(player.getUniqueId(), now);
@@ -766,8 +867,27 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    private void recordObservedActivity(Player player) {
+        Location current = player.getLocation().clone();
+        Location previous = lastObservedLocations.put(player.getUniqueId(), current);
+        if (previous == null) {
+            return;
+        }
+
+        if (!samePosition(previous, current)
+                || AfkMovement.viewChanged(
+                        previous.getYaw(),
+                        previous.getPitch(),
+                        current.getYaw(),
+                        current.getPitch()
+                )) {
+            lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
+        }
+    }
+
     private void recordActivity(Player player) {
         lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
+        lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
     }
 
     private void captureOriginalPlayerListName(Player player, AfkState state) {
