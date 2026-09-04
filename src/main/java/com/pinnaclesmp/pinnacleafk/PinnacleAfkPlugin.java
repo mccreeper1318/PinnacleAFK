@@ -548,8 +548,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         // A mounted player can move without a reliable PlayerMoveEvent. Dismount first,
-        // then capture the lock location so the AFK state is never anchored to a moving mount.
-        dismountForAfk(player);
+        // then capture the lock location only after verifying the player actually detached.
+        if (!dismountForAfk(player)) {
+            recordActivity(player);
+            if (notify) {
+                player.sendMessage(message("messages.cannot-dismount", player));
+            }
+            return;
+        }
 
         long enteredAtNanos = System.nanoTime();
         AfkState state = new AfkState(
@@ -699,15 +705,19 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
     }
 
-    private void dismountForAfk(Player player) {
-        if (player.isInsideVehicle()) {
-            player.leaveVehicle();
-            Entity remainingVehicle = player.getVehicle();
-            if (remainingVehicle != null) {
-                remainingVehicle.removePassenger(player);
-            }
-        }
+    private boolean dismountForAfk(Player player) {
+        boolean dismounted = AfkDismount.attempt(
+                player::isInsideVehicle,
+                () -> player.leaveVehicle(),
+                () -> {
+                    Entity remainingVehicle = player.getVehicle();
+                    if (remainingVehicle != null) {
+                        remainingVehicle.removePassenger(player);
+                    }
+                }
+        );
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return dismounted;
     }
 
     private void correctAfkPosition(Player player, AfkState state) {
