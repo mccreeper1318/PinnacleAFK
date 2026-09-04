@@ -79,7 +79,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private final Map<UUID, Long> lastToggleNanos = new HashMap<>();
     private final Map<UUID, Long> lastActivityNanos = new ConcurrentHashMap<>();
     private final Map<UUID, Location> lastObservedLocations = new HashMap<>();
-    private final Set<UUID> afkCorrectionTeleports = new HashSet<>();
+    private final Map<UUID, AfkCorrectionTeleport> afkCorrectionTeleports = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
     private AfkSettings settings;
     private int afkReconcileTaskId = -1;
@@ -193,7 +193,13 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
-        if (afkCorrectionTeleports.contains(event.getPlayer().getUniqueId())) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        AfkCorrectionTeleport expectedCorrection = afkCorrectionTeleports.get(playerId);
+        if (expectedCorrection != null
+                && expectedCorrection.matches(event.getCause(), event.getTo())) {
+            // The exemption is single-use. Any nested teleport that fires after the
+            // intended correction reaches this handler must pass the normal AFK blocker.
+            afkCorrectionTeleports.remove(playerId, expectedCorrection);
             return;
         }
         cancelAfkAction(event.getPlayer(), event);
@@ -722,11 +728,13 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void correctAfkPosition(Player player, AfkState state) {
         UUID playerId = player.getUniqueId();
-        afkCorrectionTeleports.add(playerId);
+        Location correctionDestination = state.lockLocation.clone();
+        AfkCorrectionTeleport expectedCorrection = AfkCorrectionTeleport.from(correctionDestination);
+        afkCorrectionTeleports.put(playerId, expectedCorrection);
         try {
-            player.teleport(state.lockLocation.clone(), PlayerTeleportEvent.TeleportCause.PLUGIN);
+            player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN);
         } finally {
-            afkCorrectionTeleports.remove(playerId);
+            afkCorrectionTeleports.remove(playerId, expectedCorrection);
         }
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
     }
