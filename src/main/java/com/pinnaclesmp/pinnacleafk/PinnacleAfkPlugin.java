@@ -685,7 +685,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private void reconcileAfkState() {
         long now = System.nanoTime();
 
-        for (Map.Entry<UUID, AfkState> entry : afkPlayers.entrySet()) {
+        // Correction failure can now remove AFK state immediately, so iterate a snapshot.
+        for (Map.Entry<UUID, AfkState> entry : List.copyOf(afkPlayers.entrySet())) {
             Player player = Bukkit.getPlayer(entry.getKey());
             if (player == null) {
                 continue;
@@ -701,10 +702,6 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     private boolean enforceAfkLock(Player player, AfkState state) {
-        if (state.correctionFailed) {
-            return false;
-        }
-
         if (player.isInsideVehicle()) {
             dismountForAfk(player);
         }
@@ -743,21 +740,24 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         UUID playerId = player.getUniqueId();
         Location correctionDestination = state.lockLocation.clone();
         AfkCorrectionTeleport expectedCorrection = AfkCorrectionTeleport.from(correctionDestination);
-        afkCorrectionTeleports.put(playerId, expectedCorrection);
 
-        boolean teleported = false;
-        try {
-            teleported = player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN);
-        } catch (RuntimeException exception) {
+        AfkCorrectionAttempt.Result attempt = AfkCorrectionAttempt.run(
+                afkCorrectionTeleports,
+                playerId,
+                expectedCorrection,
+                () -> player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN),
+                () -> expectedCorrection.matchesDestination(player.getLocation())
+        );
+
+        if (attempt.failure() != null) {
             getLogger().warning(
-                    "Could not correct AFK position for " + player.getName() + ": " + exception.getMessage()
+                    "Could not correct AFK position for " + player.getName() + ": "
+                            + attempt.failure().getMessage()
             );
-        } finally {
-            afkCorrectionTeleports.remove(playerId, expectedCorrection);
         }
 
-        if (!teleported || !expectedCorrection.matchesDestination(player.getLocation())) {
-            failAfkCorrection(player, state);
+        if (!attempt.succeeded()) {
+            failAfkCorrection(player);
             return false;
         }
 
@@ -765,21 +765,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         return true;
     }
 
-    private void failAfkCorrection(Player player, AfkState state) {
-        if (state.correctionFailed) {
-            return;
+    private void failAfkCorrection(Player player) {
+        if (isAfk(player)) {
+            // Failing the correction means the saved AFK lock can no longer be trusted.
+            // Clear AFK and protection immediately after correction bookkeeping is removed.
+            setAfk(player, false, true);
         }
-
-        state.correctionFailed = true;
-        state.invincible = false;
-        state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
-
-        UUID playerId = player.getUniqueId();
-        Bukkit.getScheduler().runTask(this, () -> {
-            if (afkPlayers.get(playerId) == state) {
-                setAfk(player, false, true);
-            }
-        });
     }
 
     private void handleMovingVehiclePassenger(Entity passenger) {
@@ -830,12 +821,6 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             long now,
             boolean notify
     ) {
-        if (state.correctionFailed) {
-            state.invincible = false;
-            state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
-            return;
-        }
-
         if (!isProtectionEligible(player)) {
             state.invincible = false;
             state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
@@ -1273,7 +1258,6 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         private boolean restoreDefaultPlayerListName = false;
         private boolean tabIndicatorApplied = false;
         private boolean invincible = false;
-        private boolean correctionFailed = false;
 
         private AfkState(
                 Location lockLocation,
