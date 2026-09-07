@@ -36,6 +36,21 @@ final class AfkStateBinding {
             AfkCorrectionAttempt.Result attempt
     ) {
         Objects.requireNonNull(attempt, "attempt");
-        return !attempt.succeeded() && isCurrent(states, playerId, expectedState);
+        if (attempt.succeeded()) {
+            return false;
+        }
+
+        if (isCurrent(states, playerId, expectedState)) {
+            return true;
+        }
+
+        // A stale correction normally must not clear a replacement AFK session. The
+        // exception is a teleport that actually completed but missed the authorized
+        // destination: PlayerChangedWorld may have deferred cleanup while the initiating
+        // correction was pending, so any replacement state is now based on a position
+        // that the stale correction moved away from. Fail that current state closed too.
+        return attempt.teleported()
+                && !attempt.destinationMatches()
+                && states.containsKey(playerId);
     }
 }
