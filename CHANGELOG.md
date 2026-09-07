@@ -10,6 +10,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Refused manual and automatic AFK entry when a player remains mounted after both normal and fallback dismount attempts, preventing invalid AFK locks or protection and reporting the rejection to the player ([#37](https://github.com/mccreeper1318/PinnacleAFK/issues/37)).
 - Restricted the AFK correction-teleport exemption to the single expected internal `PLUGIN` teleport back to the saved lock world, coordinates, yaw, and pitch, so nested or modified teleports remain blocked ([#38](https://github.com/mccreeper1318/PinnacleAFK/issues/38)).
 - Revalidated AFK correction teleports after the synchronous teleport completes, preventing later `HIGHEST` handlers from redirecting a trusted correction without the final world, coordinates, yaw, and pitch being detected and failed closed ([#41](https://github.com/mccreeper1318/PinnacleAFK/issues/41)).
+- Cleared AFK state and protection immediately when an internal correction teleport is cancelled, fails, throws, or does not finish at the saved lock location, while guaranteeing correction bookkeeping cleanup on every outcome ([#39](https://github.com/mccreeper1318/PinnacleAFK/issues/39)).
 
 ## [26.2-1.1.2] - 8/28/26
 
