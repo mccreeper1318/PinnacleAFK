@@ -31,6 +31,14 @@ class AfkCorrectionTeleportTest {
                 135.0F,
                 -22.5F
         ));
+        assertTrue(EXPECTED.matchesDestination(
+                LOCK_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
     }
 
     @Test
@@ -83,6 +91,72 @@ class AfkCorrectionTeleportTest {
                 -8.25D,
                 135.0F,
                 -21.5F
+        ));
+    }
+
+    @Test
+    void laterHighestSameWorldRedirectFailsFinalPostcondition() {
+        assertTrue(EXPECTED.matches(
+                PlayerTeleportEvent.TeleportCause.PLUGIN,
+                LOCK_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
+
+        assertFalse(EXPECTED.matchesDestination(
+                LOCK_WORLD,
+                13.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
+    }
+
+    @Test
+    void laterHighestCrossWorldRedirectFailsFinalPostcondition() {
+        assertTrue(EXPECTED.matches(
+                PlayerTeleportEvent.TeleportCause.PLUGIN,
+                LOCK_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
+
+        assertFalse(EXPECTED.matchesDestination(
+                OTHER_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
+    }
+
+    @Test
+    void laterHighestOrientationChangeFailsFinalPostcondition() {
+        assertTrue(EXPECTED.matches(
+                PlayerTeleportEvent.TeleportCause.PLUGIN,
+                LOCK_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                135.0F,
+                -22.5F
+        ));
+
+        assertFalse(EXPECTED.matchesDestination(
+                LOCK_WORLD,
+                12.5D,
+                64.0D,
+                -8.25D,
+                136.0F,
+                -22.5F
         ));
     }
 }

@@ -32,7 +32,12 @@ record AfkCorrectionTeleport(
     }
 
     boolean matches(PlayerTeleportEvent.TeleportCause cause, Location destination) {
-        if (cause != PlayerTeleportEvent.TeleportCause.PLUGIN || destination == null) {
+        return cause == PlayerTeleportEvent.TeleportCause.PLUGIN
+                && matchesDestination(destination);
+    }
+
+    boolean matchesDestination(Location destination) {
+        if (destination == null) {
             return false;
         }
 
@@ -41,8 +46,7 @@ record AfkCorrectionTeleport(
             return false;
         }
 
-        return matches(
-                cause,
+        return matchesDestination(
                 destinationWorld.getUID(),
                 destination.getX(),
                 destination.getY(),
@@ -62,7 +66,25 @@ record AfkCorrectionTeleport(
             float destinationPitch
     ) {
         return cause == PlayerTeleportEvent.TeleportCause.PLUGIN
-                && worldId.equals(destinationWorldId)
+                && matchesDestination(
+                        destinationWorldId,
+                        destinationX,
+                        destinationY,
+                        destinationZ,
+                        destinationYaw,
+                        destinationPitch
+                );
+    }
+
+    boolean matchesDestination(
+            UUID destinationWorldId,
+            double destinationX,
+            double destinationY,
+            double destinationZ,
+            float destinationYaw,
+            float destinationPitch
+    ) {
+        return worldId.equals(destinationWorldId)
                 && Double.compare(x, destinationX) == 0
                 && Double.compare(y, destinationY) == 0
                 && Double.compare(z, destinationZ) == 0
