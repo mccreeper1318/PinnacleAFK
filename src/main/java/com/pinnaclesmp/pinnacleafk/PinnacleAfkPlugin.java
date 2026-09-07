@@ -197,9 +197,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         AfkCorrectionTeleport expectedCorrection = afkCorrectionTeleports.get(playerId);
         if (expectedCorrection != null
                 && expectedCorrection.matches(event.getCause(), event.getTo())) {
-            // The exemption is single-use. Any nested teleport that fires after the
-            // intended correction reaches this handler must pass the normal AFK blocker.
-            afkCorrectionTeleports.remove(playerId, expectedCorrection);
+            // Keep the expected correction registered until Player#teleport returns.
+            // A later HIGHEST listener can still change the destination after this handler,
+            // while nested teleports to any other target must use the normal AFK blocker.
             return;
         }
         cancelAfkAction(event.getPlayer(), event);
@@ -225,7 +225,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
         if (isAfk(player)) {
+            if (afkCorrectionTeleports.containsKey(playerId)) {
+                // A redirected correction can change worlds before Player#teleport returns.
+                // Defer cleanup until the correction's actual final location is revalidated.
+                return;
+            }
+
             // A world change that bypassed the cancellable teleport events cannot safely
             // retain a lock location from the previous world.
             setAfk(player, false, true);
@@ -685,13 +692,19 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             }
 
             AfkState state = entry.getValue();
-            enforceAfkLock(player, state);
+            if (!enforceAfkLock(player, state)) {
+                continue;
+            }
             activateProtectionIfDue(player, state, now, true);
             reconcilePlayerListName(player, state);
         }
     }
 
-    private void enforceAfkLock(Player player, AfkState state) {
+    private boolean enforceAfkLock(Player player, AfkState state) {
+        if (state.correctionFailed) {
+            return false;
+        }
+
         if (player.isInsideVehicle()) {
             dismountForAfk(player);
         }
@@ -704,11 +717,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                         state.lockLocation.getYaw(),
                         state.lockLocation.getPitch()
                 )) {
-            correctAfkPosition(player, state);
-            return;
+            return correctAfkPosition(player, state);
         }
 
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return true;
     }
 
     private boolean dismountForAfk(Player player) {
@@ -726,17 +739,47 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         return dismounted;
     }
 
-    private void correctAfkPosition(Player player, AfkState state) {
+    private boolean correctAfkPosition(Player player, AfkState state) {
         UUID playerId = player.getUniqueId();
         Location correctionDestination = state.lockLocation.clone();
         AfkCorrectionTeleport expectedCorrection = AfkCorrectionTeleport.from(correctionDestination);
         afkCorrectionTeleports.put(playerId, expectedCorrection);
+
+        boolean teleported = false;
         try {
-            player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN);
+            teleported = player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN);
+        } catch (RuntimeException exception) {
+            getLogger().warning(
+                    "Could not correct AFK position for " + player.getName() + ": " + exception.getMessage()
+            );
         } finally {
             afkCorrectionTeleports.remove(playerId, expectedCorrection);
         }
+
+        if (!teleported || !expectedCorrection.matchesDestination(player.getLocation())) {
+            failAfkCorrection(player, state);
+            return false;
+        }
+
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return true;
+    }
+
+    private void failAfkCorrection(Player player, AfkState state) {
+        if (state.correctionFailed) {
+            return;
+        }
+
+        state.correctionFailed = true;
+        state.invincible = false;
+        state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+
+        UUID playerId = player.getUniqueId();
+        Bukkit.getScheduler().runTask(this, () -> {
+            if (afkPlayers.get(playerId) == state) {
+                setAfk(player, false, true);
+            }
+        });
     }
 
     private void handleMovingVehiclePassenger(Entity passenger) {
@@ -787,6 +830,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             long now,
             boolean notify
     ) {
+        if (state.correctionFailed) {
+            state.invincible = false;
+            state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
+            return;
+        }
+
         if (!isProtectionEligible(player)) {
             state.invincible = false;
             state.protectionDeadlineNanos = AfkTiming.NO_DEADLINE;
@@ -1224,6 +1273,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         private boolean restoreDefaultPlayerListName = false;
         private boolean tabIndicatorApplied = false;
         private boolean invincible = false;
+        private boolean correctionFailed = false;
 
         private AfkState(
                 Location lockLocation,
