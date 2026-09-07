@@ -94,6 +94,66 @@ class AfkStateBindingTest {
     }
 
     @Test
+    void redirectedStaleCorrectionClearsReplacementStateAfterDeferredWorldChange() {
+        Map<UUID, Object> states = new HashMap<>();
+        Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
+        Object stateA = new Object();
+        Object stateB = new Object();
+        states.put(PLAYER_ID, stateA);
+
+        AfkCorrectionAttempt.Result attempt = AfkCorrectionAttempt.run(
+                pending,
+                PLAYER_ID,
+                EXPECTED,
+                () -> {
+                    states.put(PLAYER_ID, stateB);
+                    return true;
+                },
+                () -> false
+        );
+
+        assertFalse(attempt.succeeded());
+        assertTrue(attempt.teleported());
+        assertFalse(attempt.destinationMatches());
+        assertTrue(AfkStateBinding.shouldClearAfterFailedCorrection(
+                states,
+                PLAYER_ID,
+                stateA,
+                attempt
+        ));
+        assertSame(stateB, states.get(PLAYER_ID));
+        assertTrue(pending.isEmpty());
+    }
+
+    @Test
+    void redirectedStaleCorrectionDoesNotClearWhenNoAfkStateRemains() {
+        Map<UUID, Object> states = new HashMap<>();
+        Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
+        Object stateA = new Object();
+        states.put(PLAYER_ID, stateA);
+
+        AfkCorrectionAttempt.Result attempt = AfkCorrectionAttempt.run(
+                pending,
+                PLAYER_ID,
+                EXPECTED,
+                () -> {
+                    states.remove(PLAYER_ID);
+                    return true;
+                },
+                () -> false
+        );
+
+        assertFalse(attempt.succeeded());
+        assertFalse(AfkStateBinding.shouldClearAfterFailedCorrection(
+                states,
+                PLAYER_ID,
+                stateA,
+                attempt
+        ));
+        assertTrue(pending.isEmpty());
+    }
+
+    @Test
     void failedCurrentCorrectionStillFailsClosed() {
         Map<UUID, Object> states = new HashMap<>();
         Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
