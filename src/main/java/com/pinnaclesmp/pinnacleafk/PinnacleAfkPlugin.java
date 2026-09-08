@@ -835,6 +835,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return false;
         }
 
+        refreshAfkDisplay(player, state);
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
         return true;
     }
@@ -1160,12 +1161,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         Entity existing = state.afkDisplayEntityId == null
                 ? null
                 : Bukkit.getEntity(state.afkDisplayEntityId);
-        if (existing instanceof TextDisplay textDisplay) {
+        if (existing instanceof TextDisplay textDisplay
+                && textDisplay.getWorld().equals(player.getWorld())) {
             textDisplay.text(afkMarker(player));
-            if (!player.getPassengers().contains(textDisplay)) {
-                player.addPassenger(textDisplay);
+            if (player.getPassengers().contains(textDisplay) || player.addPassenger(textDisplay)) {
+                return;
             }
-            return;
         }
 
         if (existing != null) {
