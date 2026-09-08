@@ -8,6 +8,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -38,6 +39,7 @@ class AfkCorrectionAttemptTest {
                 () -> true
         );
 
+        assertTrue(result.started());
         assertTrue(result.succeeded());
         assertTrue(result.teleported());
         assertTrue(result.destinationMatches());
@@ -60,6 +62,7 @@ class AfkCorrectionAttemptTest {
                 }
         );
 
+        assertTrue(result.started());
         assertFalse(result.succeeded());
         assertFalse(result.teleported());
         assertFalse(destinationChecked.get());
@@ -81,6 +84,7 @@ class AfkCorrectionAttemptTest {
                 () -> true
         );
 
+        assertTrue(result.started());
         assertFalse(result.succeeded());
         assertSame(failure, result.failure());
         assertTrue(pending.isEmpty());
@@ -98,6 +102,7 @@ class AfkCorrectionAttemptTest {
                 () -> false
         );
 
+        assertTrue(result.started());
         assertFalse(result.succeeded());
         assertTrue(result.teleported());
         assertFalse(result.destinationMatches());
@@ -105,7 +110,7 @@ class AfkCorrectionAttemptTest {
     }
 
     @Test
-    void nestedCorrectionDoesNotOverwriteExistingPendingCorrection() {
+    void nestedCorrectionBlockedByExistingPendingCorrectionNeverStarts() {
         Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
         AfkCorrectionTeleport existing = new AfkCorrectionTeleport(
                 WORLD_ID,
@@ -116,17 +121,30 @@ class AfkCorrectionAttemptTest {
                 5.0F
         );
         pending.put(PLAYER_ID, existing);
+        AtomicBoolean teleportAttempted = new AtomicBoolean(false);
+        AtomicBoolean destinationChecked = new AtomicBoolean(false);
 
         AfkCorrectionAttempt.Result result = AfkCorrectionAttempt.run(
                 pending,
                 PLAYER_ID,
                 EXPECTED,
-                () -> true,
-                () -> true
+                () -> {
+                    teleportAttempted.set(true);
+                    return true;
+                },
+                () -> {
+                    destinationChecked.set(true);
+                    return true;
+                }
         );
 
+        assertFalse(result.started());
         assertFalse(result.succeeded());
-        assertTrue(result.failure() instanceof IllegalStateException);
+        assertFalse(result.teleported());
+        assertFalse(result.destinationMatches());
+        assertNull(result.failure());
+        assertFalse(teleportAttempted.get());
+        assertFalse(destinationChecked.get());
         assertSame(existing, pending.get(PLAYER_ID));
     }
 }
