@@ -94,7 +94,7 @@ class AfkStateBindingTest {
     }
 
     @Test
-    void redirectedStaleCorrectionClearsReplacementStateAfterDeferredWorldChange() {
+    void redirectedStaleCorrectionDefersReplacementDecisionToFinalLockValidation() {
         Map<UUID, Object> states = new HashMap<>();
         Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
         Object stateA = new Object();
@@ -115,7 +115,7 @@ class AfkStateBindingTest {
         assertFalse(attempt.succeeded());
         assertTrue(attempt.teleported());
         assertFalse(attempt.destinationMatches());
-        assertTrue(AfkStateBinding.shouldClearAfterFailedCorrection(
+        assertFalse(AfkStateBinding.shouldClearAfterFailedCorrection(
                 states,
                 PLAYER_ID,
                 stateA,
@@ -123,6 +123,48 @@ class AfkStateBindingTest {
         ));
         assertSame(stateB, states.get(PLAYER_ID));
         assertTrue(pending.isEmpty());
+    }
+
+    @Test
+    void redirectedCorrectionClearsReplacementWhoseLockDoesNotMatchFinalLocation() {
+        AfkCorrectionAttempt.Result redirected = new AfkCorrectionAttempt.Result(
+                true,
+                false,
+                null
+        );
+
+        assertTrue(AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                redirected,
+                false
+        ));
+    }
+
+    @Test
+    void redirectedCorrectionPreservesReplacementCreatedAtFinalLocation() {
+        AfkCorrectionAttempt.Result redirected = new AfkCorrectionAttempt.Result(
+                true,
+                false,
+                null
+        );
+
+        assertFalse(AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                redirected,
+                true
+        ));
+    }
+
+    @Test
+    void cancelledStaleCorrectionNeverClearsReplacementThroughRedirectPath() {
+        AfkCorrectionAttempt.Result cancelled = new AfkCorrectionAttempt.Result(
+                false,
+                false,
+                null
+        );
+
+        assertFalse(AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                cancelled,
+                false
+        ));
     }
 
     @Test
