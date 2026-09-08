@@ -229,7 +229,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         if (isAfk(player)) {
             if (afkCorrectionTeleports.containsKey(playerId)) {
                 // A redirected correction can change worlds before Player#teleport returns.
-                // Defer cleanup until the correction's actual final location is revalidated.
+                // Defer cleanup until the correction's actual final location is revalidated,
+                // including any replacement AFK state created during the world change.
                 return;
             }
 
@@ -685,25 +686,47 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private void reconcileAfkState() {
         long now = System.nanoTime();
 
-        // Correction failure can now remove AFK state immediately, so iterate a snapshot.
+        // Correction failure can remove AFK state immediately, so iterate a snapshot and
+        // bind every action to the exact state instance captured by that snapshot entry.
         for (Map.Entry<UUID, AfkState> entry : List.copyOf(afkPlayers.entrySet())) {
-            Player player = Bukkit.getPlayer(entry.getKey());
+            UUID playerId = entry.getKey();
+            AfkState state = entry.getValue();
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
+            Player player = Bukkit.getPlayer(playerId);
             if (player == null) {
                 continue;
             }
 
-            AfkState state = entry.getValue();
             if (!enforceAfkLock(player, state)) {
                 continue;
             }
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
             activateProtectionIfDue(player, state, now, true);
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
             reconcilePlayerListName(player, state);
         }
     }
 
     private boolean enforceAfkLock(Player player, AfkState state) {
+        UUID playerId = player.getUniqueId();
+        if (!isCurrentAfkState(playerId, state)) {
+            return false;
+        }
+
         if (player.isInsideVehicle()) {
             dismountForAfk(player);
+            if (!isCurrentAfkState(playerId, state)) {
+                return false;
+            }
         }
 
         Location current = player.getLocation();
@@ -738,6 +761,10 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private boolean correctAfkPosition(Player player, AfkState state) {
         UUID playerId = player.getUniqueId();
+        if (!isCurrentAfkState(playerId, state)) {
+            return false;
+        }
+
         Location correctionDestination = state.lockLocation.clone();
         AfkCorrectionTeleport expectedCorrection = AfkCorrectionTeleport.from(correctionDestination);
 
@@ -757,7 +784,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         if (!attempt.succeeded()) {
-            failAfkCorrection(player);
+            failAfkCorrection(player, state, attempt);
+            return false;
+        }
+
+        if (!AfkStateBinding.mayContinueAfterCorrection(
+                afkPlayers,
+                playerId,
+                state,
+                attempt
+        )) {
             return false;
         }
 
@@ -765,12 +801,44 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         return true;
     }
 
-    private void failAfkCorrection(Player player) {
-        if (isAfk(player)) {
-            // Failing the correction means the saved AFK lock can no longer be trusted.
-            // Clear AFK and protection immediately after correction bookkeeping is removed.
+    private void failAfkCorrection(
+            Player player,
+            AfkState expectedState,
+            AfkCorrectionAttempt.Result attempt
+    ) {
+        UUID playerId = player.getUniqueId();
+        if (AfkStateBinding.shouldClearAfterFailedCorrection(
+                afkPlayers,
+                playerId,
+                expectedState,
+                attempt
+        )) {
+            // A failed correction invalidates the AFK session that requested it.
+            setAfk(player, false, true);
+            return;
+        }
+
+        AfkState replacementState = afkPlayers.get(playerId);
+        if (replacementState == null || replacementState == expectedState) {
+            return;
+        }
+
+        boolean replacementMatchesFinalLocation = AfkCorrectionTeleport
+                .from(replacementState.lockLocation)
+                .matchesDestination(player.getLocation());
+        if (AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                attempt,
+                replacementMatchesFinalLocation
+        ) && isCurrentAfkState(playerId, replacementState)) {
+            // World-change cleanup can be deferred while an old correction is in flight.
+            // Preserve a replacement AFK state created at the actual final destination,
+            // but fail closed if its lock belongs to a different position or world.
             setAfk(player, false, true);
         }
+    }
+
+    private boolean isCurrentAfkState(UUID playerId, AfkState expectedState) {
+        return AfkStateBinding.isCurrent(afkPlayers, playerId, expectedState);
     }
 
     private void handleMovingVehiclePassenger(Entity passenger) {
