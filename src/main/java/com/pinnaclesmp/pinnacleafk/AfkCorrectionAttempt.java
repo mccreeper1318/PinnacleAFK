@@ -27,11 +27,10 @@ final class AfkCorrectionAttempt {
                 expectedCorrection
         );
         if (existingCorrection != null) {
-            return new Result(
-                    false,
-                    false,
-                    new IllegalStateException("An AFK correction is already pending for " + playerId)
-            );
+            // Another correction already owns the player's pending-correction slot.
+            // This attempt never started, so callers must not treat it as a failure of
+            // the current AFK state or clear that state as part of fail-closed cleanup.
+            return new Result(false, false, false, null);
         }
 
         boolean teleported = false;
@@ -48,16 +47,25 @@ final class AfkCorrectionAttempt {
             pendingCorrections.remove(playerId, expectedCorrection);
         }
 
-        return new Result(teleported, finalDestinationMatches, failure);
+        return new Result(true, teleported, finalDestinationMatches, failure);
     }
 
     record Result(
+            boolean started,
             boolean teleported,
             boolean destinationMatches,
             RuntimeException failure
     ) {
+        Result(
+                boolean teleported,
+                boolean destinationMatches,
+                RuntimeException failure
+        ) {
+            this(true, teleported, destinationMatches, failure);
+        }
+
         boolean succeeded() {
-            return failure == null && teleported && destinationMatches;
+            return started && failure == null && teleported && destinationMatches;
         }
     }
 }
