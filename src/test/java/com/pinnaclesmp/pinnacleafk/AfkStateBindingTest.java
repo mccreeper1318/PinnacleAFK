@@ -94,6 +94,42 @@ class AfkStateBindingTest {
     }
 
     @Test
+    void replacementCorrectionBlockedByOlderPendingAttemptDoesNotClearReplacementState() {
+        Map<UUID, Object> states = new HashMap<>();
+        Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
+        Object replacementState = new Object();
+        states.put(PLAYER_ID, replacementState);
+
+        AfkCorrectionTeleport olderCorrection = new AfkCorrectionTeleport(
+                WORLD_ID,
+                1.0D,
+                2.0D,
+                3.0D,
+                4.0F,
+                5.0F
+        );
+        pending.put(PLAYER_ID, olderCorrection);
+
+        AfkCorrectionAttempt.Result blockedAttempt = AfkCorrectionAttempt.run(
+                pending,
+                PLAYER_ID,
+                EXPECTED,
+                () -> true,
+                () -> true
+        );
+
+        assertFalse(blockedAttempt.started());
+        assertFalse(AfkStateBinding.shouldClearAfterFailedCorrection(
+                states,
+                PLAYER_ID,
+                replacementState,
+                blockedAttempt
+        ));
+        assertSame(replacementState, states.get(PLAYER_ID));
+        assertSame(olderCorrection, pending.get(PLAYER_ID));
+    }
+
+    @Test
     void redirectedStaleCorrectionDefersReplacementDecisionToFinalLockValidation() {
         Map<UUID, Object> states = new HashMap<>();
         Map<UUID, AfkCorrectionTeleport> pending = new HashMap<>();
