@@ -229,7 +229,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         if (isAfk(player)) {
             if (afkCorrectionTeleports.containsKey(playerId)) {
                 // A redirected correction can change worlds before Player#teleport returns.
-                // Defer cleanup until the correction's actual final location is revalidated.
+                // Defer cleanup until the correction's actual final location is revalidated,
+                // including any replacement AFK state created during the world change.
                 return;
             }
 
@@ -812,8 +813,26 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                 expectedState,
                 attempt
         )) {
-            // Failing the correction only invalidates the AFK session that requested it.
-            // A replacement AFK state created re-entrantly must remain untouched.
+            // A failed correction invalidates the AFK session that requested it.
+            setAfk(player, false, true);
+            return;
+        }
+
+        AfkState replacementState = afkPlayers.get(playerId);
+        if (replacementState == null || replacementState == expectedState) {
+            return;
+        }
+
+        boolean replacementMatchesFinalLocation = AfkCorrectionTeleport
+                .from(replacementState.lockLocation)
+                .matchesDestination(player.getLocation());
+        if (AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                attempt,
+                replacementMatchesFinalLocation
+        ) && isCurrentAfkState(playerId, replacementState)) {
+            // World-change cleanup can be deferred while an old correction is in flight.
+            // Preserve a replacement AFK state created at the actual final destination,
+            // but fail closed if its lock belongs to a different position or world.
             setAfk(player, false, true);
         }
     }
