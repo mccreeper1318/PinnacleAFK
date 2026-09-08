@@ -14,6 +14,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Bound correction results and reconciliation snapshots to the exact AFK state instance that initiated them, preventing stale corrections from clearing or mutating a replacement AFK session created re-entrantly during teleport handling ([#46](https://github.com/mccreeper1318/PinnacleAFK/issues/46)).
 - Preserved malformed `config.yml` files during startup by validating the on-disk YAML before Bukkit configuration loading or saving and disabling plugin initialization on parse or read failures ([#34](https://github.com/mccreeper1318/PinnacleAFK/issues/34)).
 - Blocked AFK players from changing hotbar selection, sneak state, sprint state, or flight state, while treating those inputs as activity for non-AFK players so automatic AFK detection does not ignore stationary state changes ([#35](https://github.com/mccreeper1318/PinnacleAFK/issues/35)).
+- Lowered the above-head `[AFK]` marker by reducing its extra passenger-relative vertical translation from 2.6 blocks to 0.35 blocks, keeping it close to the player's normal nameplate ([#32](https://github.com/mccreeper1318/PinnacleAFK/issues/32)).
 
 ## [26.2-1.1.2] - 8/28/26
 
