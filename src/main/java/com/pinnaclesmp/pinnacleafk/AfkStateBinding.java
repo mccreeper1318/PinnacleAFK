@@ -36,7 +36,9 @@ final class AfkStateBinding {
             AfkCorrectionAttempt.Result attempt
     ) {
         Objects.requireNonNull(attempt, "attempt");
-        return !attempt.succeeded() && isCurrent(states, playerId, expectedState);
+        return attempt.started()
+                && !attempt.succeeded()
+                && isCurrent(states, playerId, expectedState);
     }
 
     static boolean shouldClearReplacementAfterRedirectedCorrection(
@@ -44,7 +46,8 @@ final class AfkStateBinding {
             boolean replacementMatchesFinalLocation
     ) {
         Objects.requireNonNull(attempt, "attempt");
-        return !attempt.succeeded()
+        return attempt.started()
+                && !attempt.succeeded()
                 && attempt.teleported()
                 && !attempt.destinationMatches()
                 && !replacementMatchesFinalLocation;
