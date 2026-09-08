@@ -76,7 +76,7 @@ import java.util.regex.Pattern;
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
     private static final Pattern LEGACY_PER_PLAYER_AFK_TEAM_NAME = Pattern.compile("^pafk_[0-9a-f]{11}$");
-    private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
+    private static final float AFK_MARKER_HEIGHT_OFFSET = 0.35F;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final Map<UUID, Long> lastToggleNanos = new HashMap<>();
