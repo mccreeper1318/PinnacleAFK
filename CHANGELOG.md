@@ -2,6 +2,23 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
+## [26.2-1.1.3] - Unreleased
+
+### Fixed
+
+- Prevented mounted players from bypassing the AFK movement lock by dismounting them before the lock position is captured, correcting any later mounted/displaced AFK state, and treating vehicle or otherwise observed mounted movement as activity for automatic AFK detection ([#33](https://github.com/mccreeper1318/PinnacleAFK/issues/33)).
+- Refused manual and automatic AFK entry when a player remains mounted after both normal and fallback dismount attempts, preventing invalid AFK locks or protection and reporting the rejection to the player ([#37](https://github.com/mccreeper1318/PinnacleAFK/issues/37)).
+- Failed AFK entry attempts that cannot dismount the player no longer consume the `/afk` toggle cooldown, allowing the player to dismount manually and retry immediately ([#37](https://github.com/mccreeper1318/PinnacleAFK/issues/37)).
+- Cleared the active AFK session when reconciliation or moving-vehicle handling cannot dismount the player, preventing AFK protection from remaining active while the player is still mounted ([#33](https://github.com/mccreeper1318/PinnacleAFK/issues/33)).
+- Restricted the AFK correction-teleport exemption to the single expected internal `PLUGIN` teleport back to the saved lock world, coordinates, yaw, and pitch, so nested or modified teleports remain blocked ([#38](https://github.com/mccreeper1318/PinnacleAFK/issues/38)).
+- Revalidated AFK correction teleports after the synchronous teleport completes, preventing later `HIGHEST` handlers from redirecting a trusted correction without the final world, coordinates, yaw, and pitch being detected and failed closed ([#41](https://github.com/mccreeper1318/PinnacleAFK/issues/41)).
+- Cleared AFK state and protection immediately when an internal correction teleport is cancelled, fails, throws, or does not finish at the saved lock location, while guaranteeing correction bookkeeping cleanup on every outcome ([#39](https://github.com/mccreeper1318/PinnacleAFK/issues/39)).
+- Restored the floating above-head `[AFK]` marker after successful correction teleports, reattaching same-world displays and replacing stale cross-world displays when necessary ([#39](https://github.com/mccreeper1318/PinnacleAFK/issues/39)).
+- Bound correction results and reconciliation snapshots to the exact AFK state instance that initiated them, preventing stale corrections from clearing or mutating a replacement AFK session created re-entrantly during teleport handling ([#46](https://github.com/mccreeper1318/PinnacleAFK/issues/46)).
+- Preserved malformed `config.yml` files during startup by validating the on-disk YAML before Bukkit configuration loading or saving and disabling plugin initialization on parse or read failures ([#34](https://github.com/mccreeper1318/PinnacleAFK/issues/34)).
+- Blocked AFK players from changing hotbar selection, sneak state, sprint state, or flight state, while treating those inputs as activity for non-AFK players so automatic AFK detection does not ignore stationary state changes ([#35](https://github.com/mccreeper1318/PinnacleAFK/issues/35)).
+- Lowered the above-head `[AFK]` marker by reducing its extra passenger-relative vertical translation from 2.6 blocks to 0.35 blocks, keeping it close to the player's normal nameplate ([#32](https://github.com/mccreeper1318/PinnacleAFK/issues/32)).
+
 ## [26.2-1.1.2] - 8/28/26
 
 ### Hotfix

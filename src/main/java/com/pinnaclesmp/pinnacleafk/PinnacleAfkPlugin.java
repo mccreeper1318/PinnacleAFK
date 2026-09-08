@@ -42,6 +42,7 @@ import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
+import org.bukkit.event.player.PlayerItemHeldEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerPortalEvent;
@@ -49,8 +50,11 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
+import org.bukkit.event.player.PlayerToggleFlightEvent;
+import org.bukkit.event.player.PlayerToggleSneakEvent;
+import org.bukkit.event.player.PlayerToggleSprintEvent;
+import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.configuration.InvalidConfigurationException;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
@@ -72,11 +76,13 @@ import java.util.regex.Pattern;
 public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     private static final String LEGACY_SHARED_AFK_TEAM_NAME = "pinnacleafk";
     private static final Pattern LEGACY_PER_PLAYER_AFK_TEAM_NAME = Pattern.compile("^pafk_[0-9a-f]{11}$");
-    private static final float AFK_MARKER_HEIGHT_OFFSET = 2.6F;
+    private static final float AFK_MARKER_HEIGHT_OFFSET = 0.35F;
 
     private final Map<UUID, AfkState> afkPlayers = new HashMap<>();
     private final Map<UUID, Long> lastToggleNanos = new HashMap<>();
     private final Map<UUID, Long> lastActivityNanos = new ConcurrentHashMap<>();
+    private final Map<UUID, Location> lastObservedLocations = new HashMap<>();
+    private final Map<UUID, AfkCorrectionTeleport> afkCorrectionTeleports = new HashMap<>();
     private final LegacyComponentSerializer legacy = LegacyComponentSerializer.legacyAmpersand();
     private AfkSettings settings;
     private int afkReconcileTaskId = -1;
@@ -84,7 +90,10 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @Override
     public void onEnable() {
-        loadAndValidateConfig();
+        if (!loadAndValidateConfig()) {
+            Bukkit.getPluginManager().disablePlugin(this);
+            return;
+        }
         cleanupLegacyAfkTeams();
 
         Bukkit.getPluginManager().registerEvents(this, this);
@@ -106,6 +115,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         afkPlayers.clear();
         lastToggleNanos.clear();
         lastActivityNanos.clear();
+        lastObservedLocations.clear();
+        afkCorrectionTeleports.clear();
     }
 
     @Override
@@ -130,6 +141,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         setAfk(player, enteringAfk, true);
+        if (isAfk(player) == enteringAfk && settings.toggleCooldownSeconds() > 0) {
+            lastToggleNanos.put(player.getUniqueId(), System.nanoTime());
+        }
         return true;
     }
 
@@ -188,6 +202,15 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerTeleport(PlayerTeleportEvent event) {
+        UUID playerId = event.getPlayer().getUniqueId();
+        AfkCorrectionTeleport expectedCorrection = afkCorrectionTeleports.get(playerId);
+        if (expectedCorrection != null
+                && expectedCorrection.matches(event.getCause(), event.getTo())) {
+            // Keep the expected correction registered until Player#teleport returns.
+            // A later HIGHEST listener can still change the destination after this handler,
+            // while nested teleports to any other target must use the normal AFK blocker.
+            return;
+        }
         cancelAfkAction(event.getPlayer(), event);
     }
 
@@ -197,10 +220,29 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         cancelAfkAction(event.getPlayer(), event);
     }
 
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onVehicleMove(VehicleMoveEvent event) {
+        if (samePosition(event.getFrom(), event.getTo())) {
+            return;
+        }
+
+        for (Entity passenger : event.getVehicle().getPassengers()) {
+            handleMovingVehiclePassenger(passenger);
+        }
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
         Player player = event.getPlayer();
+        UUID playerId = player.getUniqueId();
         if (isAfk(player)) {
+            if (afkCorrectionTeleports.containsKey(playerId)) {
+                // A redirected correction can change worlds before Player#teleport returns.
+                // Defer cleanup until the correction's actual final location is revalidated,
+                // including any replacement AFK state created during the world change.
+                return;
+            }
+
             // A world change that bypassed the cancellable teleport events cannot safely
             // retain a lock location from the previous world.
             setAfk(player, false, true);
@@ -331,6 +373,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerItemHeld(PlayerItemHeldEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerDropItem(PlayerDropItemEvent event) {
         cancelAfkAction(event.getPlayer(), event);
     }
@@ -345,6 +392,21 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerSwapHandItems(PlayerSwapHandItemsEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerToggleFlight(PlayerToggleFlightEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerToggleSneak(PlayerToggleSneakEvent event) {
+        cancelAfkAction(event.getPlayer(), event);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
+    public void onPlayerToggleSprint(PlayerToggleSprintEvent event) {
         cancelAfkAction(event.getPlayer(), event);
     }
 
@@ -375,13 +437,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
-        lastToggleNanos.remove(player.getUniqueId());
+        UUID playerId = player.getUniqueId();
+        lastToggleNanos.remove(playerId);
         if (isAfk(player)) {
             setAfk(player, false, false);
         }
 
         // disableAfk records activity, so this cleanup must happen afterward.
-        lastActivityNanos.remove(player.getUniqueId());
+        lastActivityNanos.remove(playerId);
+        lastObservedLocations.remove(playerId);
+        afkCorrectionTeleports.remove(playerId);
     }
 
     private void registerCommand(String commandName) {
@@ -525,6 +590,16 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
+        // A mounted player can move without a reliable PlayerMoveEvent. Dismount first,
+        // then capture the lock location only after verifying the player actually detached.
+        if (!dismountForAfk(player)) {
+            recordActivity(player);
+            if (notify) {
+                player.sendMessage(message("messages.cannot-dismount", player));
+            }
+            return;
+        }
+
         long enteredAtNanos = System.nanoTime();
         AfkState state = new AfkState(
                 player.getLocation().clone(),
@@ -533,6 +608,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         captureOriginalPlayerListName(player, state);
 
         afkPlayers.put(player.getUniqueId(), state);
+        lastObservedLocations.put(player.getUniqueId(), state.lockLocation.clone());
         ensureAfkReconcileTask();
 
         // Stop actions that began before the player entered AFK mode.
@@ -607,7 +683,6 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             }
         }
 
-        lastToggleNanos.put(player.getUniqueId(), now);
         return false;
     }
 
@@ -639,15 +714,187 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private void reconcileAfkState() {
         long now = System.nanoTime();
 
-        for (Map.Entry<UUID, AfkState> entry : afkPlayers.entrySet()) {
-            Player player = Bukkit.getPlayer(entry.getKey());
+        // Correction failure can remove AFK state immediately, so iterate a snapshot and
+        // bind every action to the exact state instance captured by that snapshot entry.
+        for (Map.Entry<UUID, AfkState> entry : List.copyOf(afkPlayers.entrySet())) {
+            UUID playerId = entry.getKey();
+            AfkState state = entry.getValue();
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
+            Player player = Bukkit.getPlayer(playerId);
             if (player == null) {
                 continue;
             }
 
-            AfkState state = entry.getValue();
+            if (!enforceAfkLock(player, state)) {
+                continue;
+            }
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
             activateProtectionIfDue(player, state, now, true);
+            if (!isCurrentAfkState(playerId, state)) {
+                continue;
+            }
+
             reconcilePlayerListName(player, state);
+        }
+    }
+
+    private boolean enforceAfkLock(Player player, AfkState state) {
+        UUID playerId = player.getUniqueId();
+        if (!isCurrentAfkState(playerId, state)) {
+            return false;
+        }
+
+        if (player.isInsideVehicle()) {
+            if (!dismountForAfk(player)) {
+                failAfkDismount(player, state);
+                return false;
+            }
+            if (!isCurrentAfkState(playerId, state)) {
+                return false;
+            }
+        }
+
+        Location current = player.getLocation();
+        if (!samePosition(current, state.lockLocation)
+                || AfkMovement.viewChanged(
+                        current.getYaw(),
+                        current.getPitch(),
+                        state.lockLocation.getYaw(),
+                        state.lockLocation.getPitch()
+                )) {
+            return correctAfkPosition(player, state);
+        }
+
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return true;
+    }
+
+    private boolean dismountForAfk(Player player) {
+        boolean dismounted = AfkDismount.attempt(
+                player::isInsideVehicle,
+                () -> player.leaveVehicle(),
+                () -> {
+                    Entity remainingVehicle = player.getVehicle();
+                    if (remainingVehicle != null) {
+                        remainingVehicle.removePassenger(player);
+                    }
+                }
+        );
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return dismounted;
+    }
+
+    private void failAfkDismount(Player player, AfkState expectedState) {
+        UUID playerId = player.getUniqueId();
+        if (isCurrentAfkState(playerId, expectedState)) {
+            setAfk(player, false, true);
+        }
+    }
+
+    private boolean correctAfkPosition(Player player, AfkState state) {
+        UUID playerId = player.getUniqueId();
+        if (!isCurrentAfkState(playerId, state)) {
+            return false;
+        }
+
+        Location correctionDestination = state.lockLocation.clone();
+        AfkCorrectionTeleport expectedCorrection = AfkCorrectionTeleport.from(correctionDestination);
+
+        AfkCorrectionAttempt.Result attempt = AfkCorrectionAttempt.run(
+                afkCorrectionTeleports,
+                playerId,
+                expectedCorrection,
+                () -> player.teleport(correctionDestination, PlayerTeleportEvent.TeleportCause.PLUGIN),
+                () -> expectedCorrection.matchesDestination(player.getLocation())
+        );
+
+        if (attempt.failure() != null) {
+            getLogger().warning(
+                    "Could not correct AFK position for " + player.getName() + ": "
+                            + attempt.failure().getMessage()
+            );
+        }
+
+        if (!attempt.succeeded()) {
+            failAfkCorrection(player, state, attempt);
+            return false;
+        }
+
+        if (!AfkStateBinding.mayContinueAfterCorrection(
+                afkPlayers,
+                playerId,
+                state,
+                attempt
+        )) {
+            return false;
+        }
+
+        refreshAfkDisplay(player, state);
+        player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
+        return true;
+    }
+
+    private void failAfkCorrection(
+            Player player,
+            AfkState expectedState,
+            AfkCorrectionAttempt.Result attempt
+    ) {
+        UUID playerId = player.getUniqueId();
+        if (AfkStateBinding.shouldClearAfterFailedCorrection(
+                afkPlayers,
+                playerId,
+                expectedState,
+                attempt
+        )) {
+            // A failed correction invalidates the AFK session that requested it.
+            setAfk(player, false, true);
+            return;
+        }
+
+        AfkState replacementState = afkPlayers.get(playerId);
+        if (replacementState == null || replacementState == expectedState) {
+            return;
+        }
+
+        boolean replacementMatchesFinalLocation = AfkCorrectionTeleport
+                .from(replacementState.lockLocation)
+                .matchesDestination(player.getLocation());
+        if (AfkStateBinding.shouldClearReplacementAfterRedirectedCorrection(
+                attempt,
+                replacementMatchesFinalLocation
+        ) && isCurrentAfkState(playerId, replacementState)) {
+            // World-change cleanup can be deferred while an old correction is in flight.
+            // Preserve a replacement AFK state created at the actual final destination,
+            // but fail closed if its lock belongs to a different position or world.
+            setAfk(player, false, true);
+        }
+    }
+
+    private boolean isCurrentAfkState(UUID playerId, AfkState expectedState) {
+        return AfkStateBinding.isCurrent(afkPlayers, playerId, expectedState);
+    }
+
+    private void handleMovingVehiclePassenger(Entity passenger) {
+        if (passenger instanceof Player player) {
+            UUID playerId = player.getUniqueId();
+            AfkState state = afkPlayers.get(playerId);
+            if (state == null) {
+                recordActivity(player);
+            } else if (!dismountForAfk(player)) {
+                failAfkDismount(player, state);
+            } else if (isCurrentAfkState(playerId, state)) {
+                correctAfkPosition(player, state);
+            }
+        }
+
+        for (Entity nestedPassenger : passenger.getPassengers()) {
+            handleMovingVehiclePassenger(nestedPassenger);
         }
     }
 
@@ -713,6 +960,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void restartAutomaticAfkTask() {
         stopAutomaticAfkTask();
+        lastObservedLocations.clear();
         if (!settings.automaticAfkEnabled()) {
             return;
         }
@@ -720,6 +968,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         long now = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             lastActivityNanos.putIfAbsent(player.getUniqueId(), now);
+            lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
         }
 
         automaticAfkTaskId = Bukkit.getScheduler()
@@ -744,8 +993,11 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         long now = System.nanoTime();
         for (Player player : Bukkit.getOnlinePlayers()) {
             if (isAfk(player)) {
+                lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
                 continue;
             }
+
+            recordObservedActivity(player);
 
             if (!settings.allowsAfkWorld(player.getWorld().getName())) {
                 lastActivityNanos.put(player.getUniqueId(), now);
@@ -766,8 +1018,27 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    private void recordObservedActivity(Player player) {
+        Location current = player.getLocation().clone();
+        Location previous = lastObservedLocations.put(player.getUniqueId(), current);
+        if (previous == null) {
+            return;
+        }
+
+        if (!samePosition(previous, current)
+                || AfkMovement.viewChanged(
+                        previous.getYaw(),
+                        previous.getPitch(),
+                        current.getYaw(),
+                        current.getPitch()
+                )) {
+            lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
+        }
+    }
+
     private void recordActivity(Player player) {
         lastActivityNanos.put(player.getUniqueId(), System.nanoTime());
+        lastObservedLocations.put(player.getUniqueId(), player.getLocation().clone());
     }
 
     private void captureOriginalPlayerListName(Player player, AfkState state) {
@@ -890,12 +1161,12 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         Entity existing = state.afkDisplayEntityId == null
                 ? null
                 : Bukkit.getEntity(state.afkDisplayEntityId);
-        if (existing instanceof TextDisplay textDisplay) {
+        if (existing instanceof TextDisplay textDisplay
+                && textDisplay.getWorld().equals(player.getWorld())) {
             textDisplay.text(afkMarker(player));
-            if (!player.getPassengers().contains(textDisplay)) {
-                player.addPassenger(textDisplay);
+            if (player.getPassengers().contains(textDisplay) || player.addPassenger(textDisplay)) {
+                return;
             }
-            return;
         }
 
         if (existing != null) {
@@ -916,9 +1187,22 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         state.afkDisplayEntityId = null;
     }
 
-    private void loadAndValidateConfig() {
+    private boolean loadAndValidateConfig() {
         saveDefaultConfig();
+        File configFile = new File(getDataFolder(), "config.yml");
+
+        try {
+            ConfigSyntaxValidator.validate(configFile);
+        } catch (IOException | InvalidConfigurationException exception) {
+            getLogger().severe(
+                    "Could not load config.yml during startup; the existing file was left unchanged. "
+                            + "Fix the YAML and restart the server: " + exception.getMessage()
+            );
+            return false;
+        }
+
         settings = readAndPersistConfig();
+        return true;
     }
 
     private AfkSettings readAndPersistConfig() {
@@ -932,10 +1216,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void reloadPluginConfig(CommandSender sender) {
         File configFile = new File(getDataFolder(), "config.yml");
-        YamlConfiguration syntaxCheck = new YamlConfiguration();
 
         try {
-            syntaxCheck.load(configFile);
+            ConfigSyntaxValidator.validate(configFile);
         } catch (IOException | InvalidConfigurationException exception) {
             getLogger().warning("Could not reload config.yml: " + exception.getMessage());
             sender.sendMessage(message("messages.reload-failed", null));
