@@ -751,7 +751,10 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         if (player.isInsideVehicle()) {
-            dismountForAfk(player);
+            if (!dismountForAfk(player)) {
+                failAfkDismount(player, state);
+                return false;
+            }
             if (!isCurrentAfkState(playerId, state)) {
                 return false;
             }
@@ -785,6 +788,13 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         );
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
         return dismounted;
+    }
+
+    private void failAfkDismount(Player player, AfkState expectedState) {
+        UUID playerId = player.getUniqueId();
+        if (isCurrentAfkState(playerId, expectedState)) {
+            setAfk(player, false, true);
+        }
     }
 
     private boolean correctAfkPosition(Player player, AfkState state) {
@@ -871,11 +881,13 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void handleMovingVehiclePassenger(Entity passenger) {
         if (passenger instanceof Player player) {
-            AfkState state = afkPlayers.get(player.getUniqueId());
+            UUID playerId = player.getUniqueId();
+            AfkState state = afkPlayers.get(playerId);
             if (state == null) {
                 recordActivity(player);
-            } else {
-                dismountForAfk(player);
+            } else if (!dismountForAfk(player)) {
+                failAfkDismount(player, state);
+            } else if (isCurrentAfkState(playerId, state)) {
                 correctAfkPosition(player, state);
             }
         }
