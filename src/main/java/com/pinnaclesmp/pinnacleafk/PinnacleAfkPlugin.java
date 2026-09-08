@@ -51,7 +51,6 @@ import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.event.vehicle.VehicleMoveEvent;
 import org.bukkit.configuration.InvalidConfigurationException;
-import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.Team;
@@ -87,7 +86,10 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @Override
     public void onEnable() {
-        loadAndValidateConfig();
+        if (!loadAndValidateConfig()) {
+            Bukkit.getPluginManager().disablePlugin(this);
+            return;
+        }
         cleanupLegacyAfkTeams();
 
         Bukkit.getPluginManager().registerEvents(this, this);
@@ -1146,9 +1148,22 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         state.afkDisplayEntityId = null;
     }
 
-    private void loadAndValidateConfig() {
+    private boolean loadAndValidateConfig() {
         saveDefaultConfig();
+        File configFile = new File(getDataFolder(), "config.yml");
+
+        try {
+            ConfigSyntaxValidator.validate(configFile);
+        } catch (IOException | InvalidConfigurationException exception) {
+            getLogger().severe(
+                    "Could not load config.yml during startup; the existing file was left unchanged. "
+                            + "Fix the YAML and restart the server: " + exception.getMessage()
+            );
+            return false;
+        }
+
         settings = readAndPersistConfig();
+        return true;
     }
 
     private AfkSettings readAndPersistConfig() {
@@ -1162,10 +1177,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     private void reloadPluginConfig(CommandSender sender) {
         File configFile = new File(getDataFolder(), "config.yml");
-        YamlConfiguration syntaxCheck = new YamlConfiguration();
 
         try {
-            syntaxCheck.load(configFile);
+            ConfigSyntaxValidator.validate(configFile);
         } catch (IOException | InvalidConfigurationException exception) {
             getLogger().warning("Could not reload config.yml: " + exception.getMessage());
             sender.sendMessage(message("messages.reload-failed", null));
