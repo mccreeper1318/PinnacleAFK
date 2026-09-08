@@ -185,6 +185,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
+        // Paper explicitly returns a player to getFrom() when a move event is cancelled.
+        // Pin that origin to the saved AFK location so every movement packet, including
+        // stop/start walking and view changes, is corrected to the exact AFK position.
         event.setFrom(state.lockLocation.clone());
         event.setCancelled(true);
         player.setVelocity(new org.bukkit.util.Vector(0.0D, 0.0D, 0.0D));
@@ -196,11 +199,15 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         AfkCorrectionTeleport expectedCorrection = afkCorrectionTeleports.get(playerId);
         if (expectedCorrection != null
                 && expectedCorrection.matches(event.getCause(), event.getTo())) {
+            // Keep the expected correction registered until Player#teleport returns.
+            // A later HIGHEST listener can still change the destination after this handler,
+            // while nested teleports to any other target must use the normal AFK blocker.
             return;
         }
         cancelAfkAction(event.getPlayer(), event);
     }
 
+    // PlayerPortalEvent has its own handler list and must be handled separately.
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerPortal(PlayerPortalEvent event) {
         cancelAfkAction(event.getPlayer(), event);
@@ -223,9 +230,14 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         UUID playerId = player.getUniqueId();
         if (isAfk(player)) {
             if (afkCorrectionTeleports.containsKey(playerId)) {
+                // A redirected correction can change worlds before Player#teleport returns.
+                // Defer cleanup until the correction's actual final location is revalidated,
+                // including any replacement AFK state created during the world change.
                 return;
             }
 
+            // A world change that bypassed the cancellable teleport events cannot safely
+            // retain a lock location from the previous world.
             setAfk(player, false, true);
         } else {
             recordActivity(player);
@@ -239,6 +251,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(priority = EventPriority.MONITOR)
     public void onPlayerRespawn(PlayerRespawnEvent event) {
+        // Failsafe for deaths or respawns initiated by other plugins outside the normal lifecycle.
         clearAfkState(event.getPlayer());
         recordActivity(event.getPlayer());
     }
@@ -257,6 +270,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
 
     @EventHandler(ignoreCancelled = true)
     public void onAsyncChat(AsyncChatEvent event) {
+        // AsyncChatEvent can run away from the server thread, so only update the
+        // thread-safe activity clock here. AFK state is evaluated by the main-thread scan.
         lastActivityNanos.put(event.getPlayer().getUniqueId(), System.nanoTime());
     }
 
@@ -270,6 +285,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         cancelAfkAction(event.getPlayer(), event);
     }
 
+    // PlayerInteractAtEntityEvent has its own handler list and must be handled separately.
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onPlayerInteractAtEntity(PlayerInteractAtEntityEvent event) {
         cancelAfkAction(event.getPlayer(), event);
@@ -329,6 +345,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
     }
 
+    // InventoryCreativeEvent has its own handler list and must be handled separately.
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onInventoryCreative(InventoryCreativeEvent event) {
         if (event.getWhoClicked() instanceof Player player) {
@@ -356,6 +373,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onEntityPickupItem(EntityPickupItemEvent event) {
         if (event.getEntity() instanceof Player player && isAfk(player)) {
+            // Pickup is passive and must not reset the inactivity timer for active players.
             event.setCancelled(true);
         }
     }
@@ -398,6 +416,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             setAfk(player, false, false);
         }
 
+        // disableAfk records activity, so this cleanup must happen afterward.
         lastActivityNanos.remove(playerId);
         lastObservedLocations.remove(playerId);
         afkCorrectionTeleports.remove(playerId);
@@ -544,6 +563,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             return;
         }
 
+        // A mounted player can move without a reliable PlayerMoveEvent. Dismount first,
+        // then capture the lock location only after verifying the player actually detached.
         if (!dismountForAfk(player)) {
             recordActivity(player);
             if (notify) {
@@ -563,6 +584,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         lastObservedLocations.put(player.getUniqueId(), state.lockLocation.clone());
         ensureAfkReconcileTask();
 
+        // Stop actions that began before the player entered AFK mode.
         player.clearActiveItem();
         player.closeInventory();
 
@@ -666,6 +688,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private void reconcileAfkState() {
         long now = System.nanoTime();
 
+        // Correction failure can remove AFK state immediately, so iterate a snapshot and
+        // bind every action to the exact state instance captured by that snapshot entry.
         for (Map.Entry<UUID, AfkState> entry : List.copyOf(afkPlayers.entrySet())) {
             UUID playerId = entry.getKey();
             AfkState state = entry.getValue();
@@ -754,7 +778,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                 () -> expectedCorrection.matchesDestination(player.getLocation())
         );
 
-        if (attempt.failure() != null && attempt.started()) {
+        if (attempt.failure() != null) {
             getLogger().warning(
                     "Could not correct AFK position for " + player.getName() + ": "
                             + attempt.failure().getMessage()
@@ -791,6 +815,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                 expectedState,
                 attempt
         )) {
+            // A failed correction invalidates the AFK session that requested it.
             setAfk(player, false, true);
             return;
         }
@@ -807,6 +832,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                 attempt,
                 replacementMatchesFinalLocation
         ) && isCurrentAfkState(playerId, replacementState)) {
+            // World-change cleanup can be deferred while an old correction is in flight.
+            // Preserve a replacement AFK state created at the actual final destination,
+            // but fail closed if its lock belongs to a different position or world.
             setAfk(player, false, true);
         }
     }
@@ -997,6 +1025,7 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         } else if (ValueOwnership.stillOwns(currentPlayerListName, state.appliedPlayerListName)) {
             return;
         } else {
+            // A value PinnacleAFK did not apply belongs to the server or another plugin.
             captureOriginalPlayerListName(player, state);
         }
 
@@ -1021,6 +1050,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
                         player.playerListName(),
                         state.appliedPlayerListName
                 )) {
+            // A null player-list name restores Minecraft's normal username rendering,
+            // which allows the client's scoreboard team prefix/suffix/color to appear again.
             player.playerListName(
                     state.restoreDefaultPlayerListName ? null : state.originalPlayerListName
             );
@@ -1138,6 +1169,8 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
     private AfkSettings readAndPersistConfig() {
         getConfig().options().copyDefaults(true);
         AfkSettings loadedSettings = AfkSettings.load(getConfig(), getLogger());
+
+        // Persist newly introduced defaults and any corrected invalid values.
         saveConfig();
         return loadedSettings;
     }
