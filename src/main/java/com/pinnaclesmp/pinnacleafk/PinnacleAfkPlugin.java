@@ -141,6 +141,9 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
         }
 
         setAfk(player, enteringAfk, true);
+        if (isAfk(player) == enteringAfk && settings.toggleCooldownSeconds() > 0) {
+            lastToggleNanos.put(player.getUniqueId(), System.nanoTime());
+        }
         return true;
     }
 
@@ -680,7 +683,6 @@ public final class PinnacleAfkPlugin extends JavaPlugin implements Listener, Com
             }
         }
 
-        lastToggleNanos.put(player.getUniqueId(), now);
         return false;
     }
 
