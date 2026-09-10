@@ -8,6 +8,15 @@ All notable changes to PinnacleAFK are documented in this file.
 
 - Added Dependabot configuration targeting the `dev` branch for Gradle and GitHub Actions dependencies, with Paper API explicitly excluded from automated dependency updates.
 
+### Dependencies
+
+- Update `actions/upload-artifact` to `7`
+- Update `org.junit:junit-bom` to `6.1.3`
+- Update `gradle-wrapper` to `9.7.1`
+- Update `gradle/actions` to `6`
+- Update `actions/setup-java` to `5`
+- Update `actions/checkout` to `7`
+
 ## [26.2-1.1.3] - 9/8/26
 
 ### Fixed
