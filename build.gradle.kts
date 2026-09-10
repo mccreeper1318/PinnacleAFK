@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "com.pinnaclesmp"
-version = "26.2-1.1.3"
+version = "26.2-1.1.4"
 
 repositories {
     mavenCentral()
