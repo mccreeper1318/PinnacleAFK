@@ -2,6 +2,12 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
+## [26.2-1.1.4]
+
+### Added
+
+- Added Dependabot configuration targeting the `dev` branch for Gradle and GitHub Actions dependencies, with Paper API explicitly excluded from automated dependency updates.
+
 ## [26.2-1.1.3] - 9/8/26
 
 ### Fixed
