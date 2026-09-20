@@ -2,7 +2,13 @@
 
 All notable changes to PinnacleAFK are documented in this file.
 
-## [26.2-1.1.4]
+## 26.3-1.1.5
+
+### Changed
+
+- Bumped `actions/setup-java` to `6`
+
+## 26.2-1.1.4
 
 ### Added
 
@@ -17,7 +23,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Update `actions/setup-java` to `5`
 - Update `actions/checkout` to `7`
 
-## [26.2-1.1.3] - 9/8/26
+## 26.2-1.1.3
 
 ### Fixed
 
@@ -34,13 +40,13 @@ All notable changes to PinnacleAFK are documented in this file.
 - Blocked AFK players from changing hotbar selection, sneak state, sprint state, or flight state, while treating those inputs as activity for non-AFK players so automatic AFK detection does not ignore stationary state changes ([#35](https://github.com/mccreeper1318/PinnacleAFK/issues/35)).
 - Lowered the above-head `[AFK]` marker by reducing its extra passenger-relative vertical translation from 2.6 blocks to 0.35 blocks, keeping it close to the player's normal nameplate ([#32](https://github.com/mccreeper1318/PinnacleAFK/issues/32)).
 
-## [26.2-1.1.2] - 8/28/26
+## 26.2-1.1.2
 
 ### Hotfix
 
 - Reworked the AFK movement lock to cancel movement packets against the saved AFK location and clear player velocity, preventing continuous walking or stop/start movement from drifting away before correction.
 
-## [26.2-1.1.1] - 8/28/26
+## 26.2-1.1.1
 
 ### Hotfix
 
@@ -48,7 +54,7 @@ All notable changes to PinnacleAFK are documented in this file.
 - Fixed tab-list restoration after leaving AFK so players using normal scoreboard team formatting return to their team prefix/color (such as `<NM>` or `<FM>`) instead of being left with a plain custom player-list name.
 - Changed the AFK tab display so the player's name is gray to match the gray `[AFK]` indicator while AFK.
 
-## [26.2-1.1.0] - 8/27/26
+## 26.2-1.1.0
 
 ### Added
 
@@ -84,14 +90,14 @@ All notable changes to PinnacleAFK are documented in this file.
 - Measured delayed protection against a monotonic real-time deadline instead of server ticks, preventing low TPS from proportionally extending the vulnerable period ([#11](https://github.com/mccreeper1318/PinnacleAFK/issues/11)).
 - Validated protection and cooldown durations during startup, logging and replacing negative, fractional, nonnumeric, or out-of-range values with safe defaults instead of silently granting instant protection ([#12](https://github.com/mccreeper1318/PinnacleAFK/issues/12)).
 
-## [1.0.2] - 2026-06-26
+## 1.0.2
 
 ### Added
 
 - Added server-wide announcements when a player enters or leaves AFK mode.
 - Added configurable AFK broadcast messages.
 
-## [1.0.1]
+## 1.0.1
 
 ### Added
 
@@ -106,7 +112,7 @@ All notable changes to PinnacleAFK are documented in this file.
 
 - Fixed original scoreboard team prefixes not being restored after leaving AFK mode.
 
-## [1.0.0]
+## 1.0.0
 
 ### Added
 
