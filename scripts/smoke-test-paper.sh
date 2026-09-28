@@ -22,6 +22,21 @@ WORK_DIR="$(realpath -m "$WORK_DIR")"
 rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR/plugins"
 
+PLUGIN_VERSION="$(python3 - "$PLUGIN_JAR" <<'PY'
+import re
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    plugin_yml = archive.read("plugin.yml").decode("utf-8")
+
+match = re.search(r"(?m)^\s*version:\s*['\"]?([^'\"\s]+)['\"]?\s*$", plugin_yml)
+if match is None:
+    raise SystemExit("Could not read plugin version from packaged plugin.yml")
+print(match.group(1))
+PY
+)"
+
 BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds"
 BUILDS_FILE="$WORK_DIR/paper-builds.json"
 curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL" -o "$BUILDS_FILE"
@@ -112,8 +127,8 @@ if [[ "$READY" != true ]]; then
     exit 1
 fi
 
-if ! grep -Eq 'Enabling PinnacleAFK v26\.3-1\.1\.5' "$SERVER_LOG"; then
-    echo "PinnacleAFK did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}." >&2
+if ! grep -Fq "Enabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
+    echo "PinnacleAFK ${PLUGIN_VERSION} did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}." >&2
     cat "$SERVER_LOG" >&2
     exit 1
 fi
@@ -128,8 +143,8 @@ printf 'stop\n' >&3
 wait "$SERVER_PID"
 SERVER_PID=""
 
-if ! grep -Eq 'Disabling PinnacleAFK v26\.3-1\.1\.5' "$SERVER_LOG"; then
-    echo "PinnacleAFK did not complete the expected disable lifecycle during shutdown." >&2
+if ! grep -Fq "Disabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
+    echo "PinnacleAFK ${PLUGIN_VERSION} did not complete the expected disable lifecycle during shutdown." >&2
     cat "$SERVER_LOG" >&2
     exit 1
 fi
@@ -137,4 +152,4 @@ fi
 trap - EXIT
 exec 3>&-
 
-echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} runtime smoke test passed."
+echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} runtime smoke test passed for PinnacleAFK ${PLUGIN_VERSION}."
