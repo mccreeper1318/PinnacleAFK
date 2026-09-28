@@ -97,6 +97,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+fail_with_log() {
+    echo "$1" >&2
+    cat "$SERVER_LOG" >&2 || true
+    exit 1
+}
+
+wait_for_log() {
+    local expected="$1"
+    local description="$2"
+
+    for _ in $(seq 1 40); do
+        if grep -Fq "$expected" "$SERVER_LOG" 2>/dev/null; then
+            return 0
+        fi
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            fail_with_log "Paper exited while waiting for ${description}."
+        fi
+        sleep 0.25
+    done
+
+    fail_with_log "Timed out waiting for ${description}: ${expected}"
+}
+
 (
     cd "$WORK_DIR"
     java -Xms512M -Xmx1536M -jar paper.jar --nogui < console.pipe > server.log 2>&1
@@ -122,31 +145,32 @@ for _ in $(seq 1 240); do
 done
 
 if [[ "$READY" != true ]]; then
-    echo "Paper did not finish startup within 240 seconds." >&2
-    cat "$SERVER_LOG" >&2 || true
-    exit 1
+    fail_with_log "Paper did not finish startup within 240 seconds."
 fi
 
 if ! grep -Fq "Enabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
-    echo "PinnacleAFK ${PLUGIN_VERSION} did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}." >&2
-    cat "$SERVER_LOG" >&2
-    exit 1
+    fail_with_log "PinnacleAFK ${PLUGIN_VERSION} did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}."
 fi
 
 if grep -Eq 'Error occurred while enabling PinnacleAFK|Could not load .*PinnacleAFK|Exception.*PinnacleAFK' "$SERVER_LOG"; then
-    echo "PinnacleAFK reported an error during startup." >&2
-    cat "$SERVER_LOG" >&2
-    exit 1
+    fail_with_log "PinnacleAFK reported an error during startup."
 fi
+
+printf 'pafk list\n' >&3
+wait_for_log "No players are currently AFK." "/pafk list output"
+
+printf 'pafk reload\n' >&3
+wait_for_log "PinnacleAFK configuration reloaded." "/pafk reload output"
+
+printf 'afk\n' >&3
+wait_for_log "Only players can use this command." "/afk console rejection"
 
 printf 'stop\n' >&3
 wait "$SERVER_PID"
 SERVER_PID=""
 
 if ! grep -Fq "Disabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
-    echo "PinnacleAFK ${PLUGIN_VERSION} did not complete the expected disable lifecycle during shutdown." >&2
-    cat "$SERVER_LOG" >&2
-    exit 1
+    fail_with_log "PinnacleAFK ${PLUGIN_VERSION} did not complete the expected disable lifecycle during shutdown."
 fi
 
 trap - EXIT
