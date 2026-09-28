@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "com.pinnaclesmp"
-version = "26.2-1.1.4"
+version = "26.3-1.1.5"
 
 repositories {
     mavenCentral()
@@ -11,9 +11,9 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:26.2.build.62-beta")
+    compileOnly("io.papermc.paper:paper-api:26.3.build.49-alpha")
 
-    testImplementation("io.papermc.paper:paper-api:26.2.build.62-beta")
+    testImplementation("io.papermc.paper:paper-api:26.3.build.49-alpha")
     testImplementation(platform("org.junit:junit-bom:6.1.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
