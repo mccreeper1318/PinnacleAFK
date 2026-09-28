@@ -112,6 +112,12 @@ jobs:
           echo "jar=$RELEASE_DIR/$EXPECTED_NAME" >> "$GITHUB_OUTPUT"
           echo "checksum=$RELEASE_DIR/$EXPECTED_NAME.sha256" >> "$GITHUB_OUTPUT"
 
+      - name: Smoke test on Paper 26.3 beta
+        env:
+          PAPER_VERSION: "26.3"
+          PAPER_BUILD: "134"
+        run: bash scripts/smoke-test-paper.sh "${{ steps.plugin.outputs.jar }}"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
