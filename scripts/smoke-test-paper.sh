@@ -23,14 +23,17 @@ rm -rf "$WORK_DIR"
 mkdir -p "$WORK_DIR/plugins"
 
 BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds"
-BUILDS_RESPONSE="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL")"
+BUILDS_FILE="$WORK_DIR/paper-builds.json"
+curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL" -o "$BUILDS_FILE"
 
-PAPER_URL="$(python3 - "$PAPER_BUILD" <<'PY' <<<"$BUILDS_RESPONSE"
+PAPER_URL="$(python3 - "$PAPER_BUILD" "$BUILDS_FILE" <<'PY'
 import json
 import sys
 
 build = int(sys.argv[1])
-builds = json.load(sys.stdin)
+with open(sys.argv[2], encoding="utf-8") as stream:
+    builds = json.load(stream)
+
 for candidate in builds:
     if candidate.get("id") == build and candidate.get("channel") == "BETA":
         download = candidate.get("downloads", {}).get("server:default", {})
