@@ -3,7 +3,7 @@ version: '${version}'
 main: com.pinnaclesmp.pinnacleafk.PinnacleAfkPlugin
 description: Adds manual or automatic AFK status with configurable displays, movement lock, and delayed protection.
 author: PinnacleSMP
-api-version: '26.2'
+api-version: '26.3'
 commands:
   afk:
     description: Toggle AFK mode on or off.

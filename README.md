@@ -1,6 +1,6 @@
 # PinnacleAFK
 
-PinnacleAFK is a PaperMC 26.2 plugin that gives players a simple `/afk` command with clear AFK indicators, a complete movement/action lock, optional automatic AFK detection, and configurable delayed damage protection.
+PinnacleAFK is a PaperMC 26.3 plugin that gives players a simple `/afk` command with clear AFK indicators, a complete movement/action lock, optional automatic AFK detection, and configurable delayed damage protection.
 
 ## Features
 
@@ -20,7 +20,7 @@ PinnacleAFK is a PaperMC 26.2 plugin that gives players a simple `/afk` command 
 
 ## Requirements
 
-- PaperMC 26.2
+- PaperMC 26.3
 - Java 25
 
 ## Installation
