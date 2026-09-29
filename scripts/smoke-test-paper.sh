@@ -45,28 +45,14 @@ fi
 BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds"
 BUILDS_RESPONSE="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL")"
 
-PAPER_URL="$(python3 - "$PAPER_BUILD" <<'PY' <<<"$BUILDS_RESPONSE"
-import json
-import sys
-
-build = int(sys.argv[1])
-builds = json.load(sys.stdin)
-for candidate in builds:
-    if candidate.get("id") == build and candidate.get("channel") == "BETA":
-        download = candidate.get("downloads", {}).get("server:default", {})
-        url = download.get("url")
-        if url:
-            print(url)
-            raise SystemExit(0)
-raise SystemExit(1)
-PY
-)" || {
-    echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} was not found in the BETA channel." >&2
-    exit 1
-}
+PAPER_URL="$(
+    printf '%s' "$BUILDS_RESPONSE" \
+        | jq -r --argjson build "$PAPER_BUILD" \
+            'first(.[] | select(.id == $build and .channel == "BETA") | .downloads."server:default".url) // empty'
+)"
 
 if [[ -z "$PAPER_URL" ]]; then
-    echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} did not provide a server download URL." >&2
+    echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} was not found in the BETA channel with a server download URL." >&2
     exit 1
 fi
 
