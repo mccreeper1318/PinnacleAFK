@@ -32,23 +32,25 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 
 match = re.search(r"(?m)^\s*version:\s*['\"]?([^'\"\s]+)['\"]?\s*$", plugin_yml)
 if match is None:
-    raise SystemExit("Could not read plugin version from packaged plugin.yml")
+    raise SystemExit("Could not read the version from plugin.yml inside the JAR.")
 print(match.group(1))
 PY
 )"
 
-BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds"
-BUILDS_FILE="$WORK_DIR/paper-builds.json"
-curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL" -o "$BUILDS_FILE"
+if [[ -z "$PLUGIN_VERSION" ]]; then
+    echo "Could not determine PinnacleAFK version from the packaged plugin.yml." >&2
+    exit 1
+fi
 
-PAPER_URL="$(python3 - "$PAPER_BUILD" "$BUILDS_FILE" <<'PY'
+BUILDS_URL="https://fill.papermc.io/v3/projects/paper/versions/${PAPER_VERSION}/builds"
+BUILDS_RESPONSE="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL")"
+
+PAPER_URL="$(python3 - "$PAPER_BUILD" <<'PY' <<<"$BUILDS_RESPONSE"
 import json
 import sys
 
 build = int(sys.argv[1])
-with open(sys.argv[2], encoding="utf-8") as stream:
-    builds = json.load(stream)
-
+builds = json.load(sys.stdin)
 for candidate in builds:
     if candidate.get("id") == build and candidate.get("channel") == "BETA":
         download = candidate.get("downloads", {}).get("server:default", {})
@@ -97,29 +99,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-fail_with_log() {
-    echo "$1" >&2
-    cat "$SERVER_LOG" >&2 || true
-    exit 1
-}
-
-wait_for_log() {
-    local expected="$1"
-    local description="$2"
-
-    for _ in $(seq 1 40); do
-        if grep -Fq "$expected" "$SERVER_LOG" 2>/dev/null; then
-            return 0
-        fi
-        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            fail_with_log "Paper exited while waiting for ${description}."
-        fi
-        sleep 0.25
-    done
-
-    fail_with_log "Timed out waiting for ${description}: ${expected}"
-}
-
 (
     cd "$WORK_DIR"
     java -Xms512M -Xmx1536M -jar paper.jar --nogui < console.pipe > server.log 2>&1
@@ -145,32 +124,52 @@ for _ in $(seq 1 240); do
 done
 
 if [[ "$READY" != true ]]; then
-    fail_with_log "Paper did not finish startup within 240 seconds."
+    echo "Paper did not finish startup within 240 seconds." >&2
+    cat "$SERVER_LOG" >&2 || true
+    exit 1
 fi
 
 if ! grep -Fq "Enabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
-    fail_with_log "PinnacleAFK ${PLUGIN_VERSION} did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}."
+    echo "PinnacleAFK ${PLUGIN_VERSION} did not report a successful enable on Paper ${PAPER_VERSION} build ${PAPER_BUILD}." >&2
+    cat "$SERVER_LOG" >&2
+    exit 1
 fi
 
 if grep -Eq 'Error occurred while enabling PinnacleAFK|Could not load .*PinnacleAFK|Exception.*PinnacleAFK' "$SERVER_LOG"; then
-    fail_with_log "PinnacleAFK reported an error during startup."
+    echo "PinnacleAFK reported an error during startup." >&2
+    cat "$SERVER_LOG" >&2
+    exit 1
 fi
 
 printf 'pafk list\n' >&3
-wait_for_log "No players are currently AFK." "/pafk list output"
-
 printf 'pafk reload\n' >&3
-wait_for_log "PinnacleAFK configuration reloaded." "/pafk reload output"
-
 printf 'afk\n' >&3
-wait_for_log "Only players can use this command." "/afk console rejection"
+
+COMMANDS_OK=false
+for _ in $(seq 1 30); do
+    if grep -Fq 'No players are currently AFK.' "$SERVER_LOG" \
+        && grep -Fq 'PinnacleAFK configuration reloaded.' "$SERVER_LOG" \
+        && grep -Fq 'Only players can use this command.' "$SERVER_LOG"; then
+        COMMANDS_OK=true
+        break
+    fi
+    sleep 1
+done
+
+if [[ "$COMMANDS_OK" != true ]]; then
+    echo "PinnacleAFK console command smoke checks did not produce the expected responses." >&2
+    cat "$SERVER_LOG" >&2
+    exit 1
+fi
 
 printf 'stop\n' >&3
 wait "$SERVER_PID"
 SERVER_PID=""
 
 if ! grep -Fq "Disabling PinnacleAFK v${PLUGIN_VERSION}" "$SERVER_LOG"; then
-    fail_with_log "PinnacleAFK ${PLUGIN_VERSION} did not complete the expected disable lifecycle during shutdown."
+    echo "PinnacleAFK did not complete the expected disable lifecycle during shutdown." >&2
+    cat "$SERVER_LOG" >&2
+    exit 1
 fi
 
 trap - EXIT
