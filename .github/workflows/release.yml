@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing GitHub release tag to build
+        description: Existing GitHub release tag to build (for example 26.3-1.2.0-beta.1)
         required: true
         type: string
 
@@ -60,19 +60,26 @@ jobs:
             VERSION="${VERSION#v}"
           fi
 
-          # Stable example: 26.2-1.1.0
-          # Prerelease examples: 26.2-1.1.0-beta.1, 26.2-1.1.0-rc.2
-          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+          # Stable example: 26.3-1.2.0
+          # Supported prerelease examples:
+          #   26.3-1.2.0-alpha.1
+          #   26.3-1.2.0-beta.1
+          #   26.3-1.2.0-rc.1
+          if [[ "$VERSION" =~ ^([0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+)(-(alpha|beta|rc)\.([0-9]+))?$ ]]; then
             BASE_VERSION="${BASH_REMATCH[1]}"
+            PRERELEASE_LABEL="${BASH_REMATCH[3]:-}"
+            PRERELEASE_NUMBER="${BASH_REMATCH[4]:-}"
           else
             echo "Invalid PinnacleAFK release tag: $RAW_TAG"
-            echo "Expected a tag such as 26.2-1.1.0, 26.2-1.1.0-beta.1, or the same tag prefixed with v."
+            echo "Expected a stable tag such as 26.3-1.2.0 or a prerelease tag such as 26.3-1.2.0-beta.1."
+            echo "Optional v/v. prefixes are also accepted."
             exit 1
           fi
 
           TAG_IS_PRERELEASE=false
-          if [[ "$VERSION" != "$BASE_VERSION" ]]; then
+          if [[ -n "$PRERELEASE_LABEL" ]]; then
             TAG_IS_PRERELEASE=true
+            echo "Prerelease tag detected: ${PRERELEASE_LABEL}.${PRERELEASE_NUMBER}"
           fi
 
           RELEASE_IS_PRERELEASE="$(
