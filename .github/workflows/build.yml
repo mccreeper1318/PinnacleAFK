@@ -115,7 +115,7 @@ jobs:
       - name: Smoke test on Paper 26.3 beta
         env:
           PAPER_VERSION: "26.3"
-          PAPER_BUILD: "134"
+          PAPER_BUILD: "159"
         run: bash scripts/smoke-test-paper.sh "${{ steps.plugin.outputs.jar }}"
 
       - name: Upload build artifact
