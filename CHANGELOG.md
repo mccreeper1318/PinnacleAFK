@@ -7,6 +7,7 @@ All notable changes to PinnacleAFK are documented in this file.
 ### Changed
 
 - Updated the Paper API target from `26.2.build.62-beta` to `26.3.build.134-beta` for Minecraft/Paper 26.3 beta compatibility (#61).
+- Updated the pinned Paper API and Paper 26.3 CI/runtime smoke-test target from `26.3.build.134-beta` to `26.3.build.159-beta`.
 - Updated the plugin API declaration from `26.2` to `26.3` (#61).
 - Updated the project version to `26.3-1.2.0` while retaining the Java 25 toolchain required by Paper 26.3 (#61).
 - Bumped `actions/setup-java` to `6` and `gradle-wrapper` from `9.7.1` to `9.8.0`.
