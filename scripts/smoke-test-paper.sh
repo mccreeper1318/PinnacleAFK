@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PAPER_VERSION="${PAPER_VERSION:-26.3}"
-PAPER_BUILD="${PAPER_BUILD:-134}"
+PAPER_BUILD="${PAPER_BUILD:-159}"
 PLUGIN_JAR="${1:-}"
 WORK_DIR="${2:-build/paper-smoke}"
 USER_AGENT="PinnacleAFK-CI/1.0 (https://github.com/mccreeper1318/PinnacleAFK)"
