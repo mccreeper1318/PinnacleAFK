@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PAPER_VERSION="${PAPER_VERSION:-26.3}"
-PAPER_BUILD="${PAPER_BUILD:-159}"
+PAPER_BUILD="${PAPER_BUILD:-178}"
 PLUGIN_JAR="${1:-}"
 WORK_DIR="${2:-build/paper-smoke}"
 USER_AGENT="PinnacleAFK-CI/1.0 (https://github.com/mccreeper1318/PinnacleAFK)"
@@ -48,11 +48,11 @@ BUILDS_RESPONSE="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$BUILDS_URL")"
 PAPER_URL="$(
     printf '%s' "$BUILDS_RESPONSE" \
         | jq -r --argjson build "$PAPER_BUILD" \
-            'first(.[] | select(.id == $build and .channel == "BETA") | .downloads."server:default".url) // empty'
+            'first(.[] | select(.id == $build and .channel == "STABLE") | .downloads."server:default".url) // empty'
 )"
 
 if [[ -z "$PAPER_URL" ]]; then
-    echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} was not found in the BETA channel with a server download URL." >&2
+    echo "Paper ${PAPER_VERSION} build ${PAPER_BUILD} was not found in the STABLE channel with a server download URL." >&2
     exit 1
 fi
 
